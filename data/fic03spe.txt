@@ -1,0 +1,148 @@
+79	69609936	H	ADAPALENE/PEROXYDE DE BENZOYLE BAILLEUL 0,1 %/2,5 %, gel	           
+80	61783479	H	ADAPALENE/PEROXYDE DE BENZOYLE BAILLEUL 0,3 %/2,5 %, gel	           
+60	68615523	H	AICISI 10 mg/mL, collyre en suspension	           
+72	69250554	R	ALOSTIL 5 %, mousse pour application cutanée en flacon pressurisé	           
+56	63527336	H	AMIRIOX 0,3 mg/mL, collyre en solution	           
+53	61189366	R	AMYCOR 1 POUR CENT, crème pour application locale	           
+84	66921927	R	AVAMYS 27,5 microgrammes/pulvérisation, suspension pour pulvérisation nasale	           
+81	65725797	H	AZAFLUNEX 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
+59	65711858	R	AZARGA 10 mg/mL + 5 mg/mL, collyre en suspension	           
+81	60418221	H	AZELASTINE CHLORHYDRATE / FLUTICASONE PROPIONATE BIOGARAN 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
+81	65857172	H	AZELASTINE CHLORHYDRATE / FLUTICASONE PROPIONATE LA COLINA 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
+81	65773169	H	AZELASTINE CHLORHYDRATE/FLUTICASONE PROPIONATE SUBSTIPHARM 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
+81	61056394	H	AZELASTINE CHLORHYDRATE/FLUTICASONE PROPIONATE ZENTIVA 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
+81	61878817	H	AZELASTINE CHLORHYDRATE/FLUTICASONE PROPIONATE ZYDUS 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
+60	60868670	R	AZOPT 10 mg/ml, collyre en suspension	           
+42	66508241	H	BECLOMETASONE/FORMOTEROL BIOGARAN 100/6 microgrammes/dose, solution pour inhalation en flacon pressurisé	           
+47	60311408	H	BECLOMETASONE/FORMOTEROL BIOGARAN 200/6 microgrammes/dose, solution pour inhalation en flacon pressurisé	           
+42	62113542	H	BECLOMETASONE/FORMOTEROL CIPLA 100/6 microgrammes/dose, solution pour inhalation en flacon pressurisé	           
+47	63123799	H	BECLOMETASONE/FORMOTEROL CIPLA 200/6 microgrammes/dose, solution pour inhalation en flacon pressurisé	           
+42	61390718	H	BECLOMETASONE/FORMOTEROL EG 100/6 microgrammes/dose, solution pour inhalation en flacon pressurisé	           
+47	69962879	H	BECLOMETASONE/FORMOTEROL EG 200/6 microgrammes/dose, solution pour inhalation en flacon pressurisé	           
+42	62405952	H	BECLOMETASONE/FORMOTEROL TEVA 100/6 microgrammes/dose, solution pour inhalation en flacon pressurisé	           
+47	62489911	H	BECLOMETASONE/FORMOTEROL TEVA 200/6 microgrammes/dose,solution pour inhalation en flacon pressurisé	           
+42	64896432	H	BECLOMETASONE/FORMOTEROL VIATRIS 100/6 microgrammes/dose, solution pour inhalation en flacon pressurisé	           
+47	66794561	H	BECLOMETASONE/FORMOTEROL VIATRIS 200/6 microgrammes par dose, solution pour inhalation en flacon pressurisé	           
+42	63386227	H	BECLOMETASONE/FORMOTEROL ZENTIVA 100/6 microgrammes/dose, solution pour inhalation en flacon pressurisé	           
+47	63646148	H	BECLOMETASONE/FORMOTEROL ZENTIVA 200/6 microgrammes/dose, solution pour inhalation en flacon pressurisé	           
+53	65266290	H	BIFONAZOLE GERDA 1%, crème	           
+53	65845138	H	BIFONAZOLE SUBSTIPHARM 1 %, crème	           
+54	60607955	H	BIMATOPROST BIOGARAN 0,1 mg/mL, collyre en solution	           
+54	63157965	H	BIMATOPROST MICRO LABS 0,1 mg/mL, collyre en solution	           
+56	60456275	H	BIMATOPROST MICRO LABS 0,3 mg/mL, collyre en solution	           
+54	62931728	H	BIMATOPROST TEVA SANTE 0,1 mg/mL, collyre en solution	           
+57	61558710	H	BIMATOPROST/TIMOLOL EG LABO 0,3 mg/5 mg par mL, collyre en solution en récipient unidose	           
+58	64734188	H	BIMATOPROST/TIMOLOL GENETIC 0,3 mg/5 mg par mL, collyre en solution	           
+57	66867568	H	BIMATOPROST/TIMOLOL GENETIC 0,3 mg/5 mg par mL, collyre en solution en récipient unidose	           
+58	64827703	H	BIMATOPROST/TIMOLOL MICRO LABS 0,3 mg/5 mg par mL, collyre en solution	           
+70	61837560	R	BISEPTINE, solution pour application locale	           
+64	62593867	R	BISEPTINESPRAID, solution pour application cutanée	           
+57	66107266	H	BITIFRIN 0,3 mg/5 mg par mL, collyre en solution	           
+59	62098439	H	BLIZOMIT 10 mg/5 mg par mL, collyre en suspension	           
+61	63374716	H	BORAX / ACIDE BORIQUE ARROW 12 mg/18 mg/ml, solution pour lavage ophtalmique en récipient unidose	           
+61	63165015	H	BORAX/ACIDE BORIQUE ARROW CONSEIL 12 mg/18 mg/par mL, solution pour lavage ophtalmique en récipient unidose	           
+62	69961204	H	BRIMONIDINE/TIMOLOL BIOGARAN 2 mg/mL + 5 mg/mL, collyre en solution	           
+60	68177128	H	BRINZOLAMIDE GNR 10 mg/mL, collyre en suspension	           
+63	66944801	H	BRINZOLAMIDE/BRIMONIDINE PHARMATHEN 10 mg/2 mg par mL, collyre en suspension	           
+63	69889737	H	BRINZOLAMIDE/BRIMONIDINE ZENTIVA 10 mg/2 mg par mL, collyre en suspension	           
+59	65832913	H	BRINZOLAMIDE/TIMOLOL BIOGARAN 10 mg/mL + 5 mg/mL, collyre en suspension	           
+59	61083683	H	BRINZOLAMIDE/TIMOLOL ZENTIVA 10 mg/5 mg par mL, collyre en suspension	           
+82	61091445	H	CABESOL 500 microgrammes/g, shampooing	           
+78	60120260	H	CHLORHEXIDINE LIBERTY PHARMA 0,20 %, solution pour bain de bouche	           
+64	66194520	H	CHLORHEXIDINE/BENZALKONIUM/ALCOOL BENZYLIQUE EG LABO CONSEIL, solution pour application cutanée	           
+65	63273126	H	CICLOPIROX OLAMINE ARROW 1%, crème	           
+66	64330943	H	CICLOPIROX OLAMINE ARROW 1,5 %, shampooing	           
+66	61304893	H	CICLOPIROX OLAMINE BIOGARAN 1,5%, shampooing	           
+66	66055894	H	CICLOPIROX OLAMINE VENIPHARM 1,5 %, shampooing	           
+66	64613820	H	CICLOPIROX OLAMINE VIATRIS 1,5 %, shampooing	           
+67	65926227	H	CICLOPIROX SUBSTIPHARM 80 mg/g, vernis à ongles médicamenteux	           
+86	68601502	R	CILOXADEX 3 mg/1 mg par mL, suspension pour instillation auriculaire	           
+82	69724301	R	CLOBEX 500 microgrammes/g, shampooing	           
+68	61853543	H	CLOSALIS 50 microgrammes/0,5 mg/g, pommade	           
+62	60657189	R	COMBIGAN 2 mg/mL + 5 mg/mL, collyre en solution	           
+67	68680275	H	CONYDIX 80 mg/g, vernis à ongles médicamenteux	           
+61	69667569	R	DACRYOSERUM, solution pour lavage ophtalmique en récipient unidose	           
+68	63931033	R	DAIVOBET 50 microgrammes/0,5 mg/g, pommade	           
+81	68250971	H	DEMOLAPE 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
+73	62186241	R	DESOMEDINE 0,1 %, collyre en solution	           
+62	65059765	H	DIBRINOL 2 mg/mL + 5 mg/mL, collyre en solution	           
+83	60563188	H	DICLOFENAC TEVA SANTE 1 %, gel	           
+81	60830011	R	DYMISTA 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
+78	67960413	R	ELUDRILPERIO 0,20 %, solution pour bain de bouche	           
+79	60972530	R	EPIDUO 0,1 %/2,5 %, gel	           
+80	64950392	R	EPIDUO 0,3 %/2,5 %, gel	           
+43	62933355	R	FLIXOTIDE 125 microgrammes/dose, suspension pour inhalation en flacon pressurisé	           
+44	66545581	R	FLIXOTIDE 250 microgrammes/dose, suspension pour inhalation en flacon pressurisé	           
+84	66160831	H	FLUTICASONE FUROATE TEVA 27,5 microgrammes/pulvérisation, suspension pour pulvérisation nasale	           
+58	66489175	R	GANFORT 0,3 mg/ml + 5 mg/ml, collyre en solution	           
+57	60892664	R	GANFORT 0,3 mg/ml + 5 mg/ml, collyre en solution en récipient unidose	           
+69	62942532	R	GELTIM LP 1 mg/g, gel ophtalmique en récipient unidose	           
+69	64618696	H	GENOPTOL 1 mg/g, gel ophtalmique en récipient unidose	           
+76	66798410	H	GLYCOPYRRONIUM BIOGARAN AXICA 44 microgrammes, poudre pour inhalation en gélule	           
+42	60701778	R	INNOVAIR 100/6 microgrammes/dose, solution pour inhalation en flacon pressurisé	           
+47	60241874	R	INNOVAIR 200/6 microgrammes par dose, solution pour inhalation en flacon pressurisé	           
+64	65200454	H	KIDOTI, solution pour application cutanée	           
+70	65245677	H	KIPODENAL, solution pour application locale	           
+71	69504547	H	LIFOG 50 microgrammes/mL, collyre en solution	           
+72	68316503	H	LOTORIN 5 %, mousse cutanée	           
+54	66203859	R	LUMIGAN 0,1 mg/ml, collyre en solution	           
+56	60135981	R	LUMIGAN 0,3 mg/ml, collyre en solution	           
+55	69245945	R	LUMIGAN 0,3 mg/ml, collyre en solution en récipient unidose	           
+65	65316206	R	MYCOSTER 1 pour cent, crème	           
+85	69649126	R	NASACORT 55 microgrammes par dose, suspension pour pulvérisation nasale	           
+67	61794408	R	ONYTEC 80 mg/g, vernis à ongles médicamenteux	           
+66	64414156	H	PILAREN 1,5%, shampooing	           
+87	65832411	R	PIVALONE 1 POUR CENT, suspension nasale	           
+43	69713543	H	PROPIONATE DE FLUTICASONE TEVA 125 microgrammes/dose, suspension pour inhalation en flacon pressurisé	           
+44	68250875	H	PROPIONATE DE FLUTICASONE TEVA 250 microgrammes/dose, suspension pour inhalation en flacon pressurisé	           
+48	65043469	H	PROPIONATE DE FLUTICASONE/SALMETEROL ARROW AIRMASTER 100 microgrammes/ 50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+49	60781984	H	PROPIONATE DE FLUTICASONE/SALMETEROL ARROW AIRMASTER 250 microgrammes/ 50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+50	65541516	H	PROPIONATE DE FLUTICASONE/SALMETEROL ARROW AIRMASTER 500 microgrammes/ 50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+48	64438716	H	PROPIONATE DE FLUTICASONE/SALMETEROL BIOGARAN AIRMASTER 100 microgrammes/ 50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+49	62347260	H	PROPIONATE DE FLUTICASONE/SALMETEROL BIOGARAN AIRMASTER 250 microgrammes/ 50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+50	66796758	H	PROPIONATE DE FLUTICASONE/SALMETEROL BIOGARAN AIRMASTER 500 microgrammes/ 50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+48	69518205	H	PROPIONATE DE FLUTICASONE/SALMETEROL EG AIRMASTER 100 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+49	62466193	H	PROPIONATE DE FLUTICASONE/SALMETEROL EG AIRMASTER 250 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+50	62788696	H	PROPIONATE DE FLUTICASONE/SALMETEROL EG AIRMASTER 500 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+51	69376535	H	PROPIONATE DE FLUTICASONE/SALMETEROL SANDOZ 125 microgrammes/ 25 microgrammes/dose, suspension pour inhalation en flacon pressurisé	           
+52	61388471	H	PROPIONATE DE FLUTICASONE/SALMETEROL SANDOZ 250 microgrammes/ 25 microgrammes/dose, suspension pour inhalation en flacon pressurisé	           
+51	68513632	H	PROPIONATE DE FLUTICASONE/SALMETEROL TEVA 125 microgrammes/25 microgrammes/dose, suspension pour inhalation en flacon pressurisé	           
+52	62025658	H	PROPIONATE DE FLUTICASONE/SALMETEROL TEVA 250 microgrammes/25 microgrammes/dose, suspension pour inhalation en flacon pressurisé	           
+49	63313268	H	PROPIONATE DE FLUTICASONE/SALMETEROL TEVA RESPIHALER 250 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+50	61622974	H	PROPIONATE DE FLUTICASONE/SALMETEROL TEVA RESPIHALER 500 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+48	69214519	H	PROPIONATE DE FLUTICASONE/SALMETEROL VIATRIS 100 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+49	64541342	H	PROPIONATE DE FLUTICASONE/SALMETEROL VIATRIS 250 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+50	64188732	H	PROPIONATE DE FLUTICASONE/SALMETEROL VIATRIS 500 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+48	67439556	H	PROPIONATE DE FLUTICASONE/SALMETEROL ZENTIVA 100 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+51	62811974	H	PROPIONATE DE FLUTICASONE/SALMETEROL ZENTIVA 125 microgrammes/25 microgrammes/dose, suspension pour inhalation en flacon pressurisé	           
+52	62354881	H	PROPIONATE DE FLUTICASONE/SALMETEROL ZENTIVA 250 microgrammes/25 microgrammes/dose, suspension pour inhalation en flacon pressurisé	           
+49	61041232	H	PROPIONATE DE FLUTICASONE/SALMETEROL ZENTIVA 250 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+75	67419742	H	PROPIONATE DE FLUTICASONE/SALMETEROL ZENTIVA 50 microgrammes/25 microgrammes/dose, suspension pour inhalation en flacon pressurisé	           
+50	68306249	H	PROPIONATE DE FLUTICASONE/SALMETEROL ZENTIVA 500 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+85	69528338	H	PULVOSA 55 microgrammes/dose, suspension pour pulvérisation nasale	           
+64	61070515	H	RUTILAU, solution pour application cutanée	           
+66	64391992	R	SEBIPROX 1,5 %, shampooing	           
+76	69941269	R	SEEBRI BREEZHALER 44 microgrammes, poudre pour inhalation en gélule	           
+51	69505268	R	SERETIDE 125 microgrammes/25 microgrammes/dose, suspension pour inhalation en flacon pressurisé avec valve doseuse	           
+52	61073237	R	SERETIDE 250 microgrammes/25 microgrammes/dose, suspension pour inhalation en flacon pressurisé avec valve doseuse	           
+75	64587838	R	SERETIDE 50 microgrammes/25 microgrammes/dose, suspension pour inhalation en flacon pressurisé avec valve doseuse	           
+48	67546191	R	SERETIDE DISKUS 100 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+49	61572165	R	SERETIDE DISKUS 250 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+50	60569419	R	SERETIDE DISKUS 500 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose	           
+63	64880296	R	SIMBRINZA 10 mg/ml + 2 mg/ml, collyre en suspension	           
+86	62685917	H	SONIXAL 3 mg/1 mg par mL, suspension pour instillation auriculaire	           
+22	60363967	R	SPIRIVA 18 microgrammes, poudre pour inhalation en gélule	           
+65	64859640	H	TAMOLAC 1 %, crème	           
+70	63582585	H	TELLIMED, solution pour application locale	           
+22	61893609	H	TIOTROPIUM BIOGARAN EOLIP 18 microgrammes, poudre pour inhalation en gélule	           
+22	61922808	H	TIOTROPIUM EG VERTICAL-HALER 18 microgrammes, poudre pour inhalation en gélule	           
+22	63653114	H	TIOTROPIUM VIATRIS 18 microgrammes, poudre pour inhalation en gélule	           
+87	65206304	H	TIXOCORTOL H4 PHARMA 1%, suspension nasale	           
+85	68808419	H	TRIAMCINOLONE ACETONIDE SUBSTIPHARM 55 microgrammes/dose, suspension pour pulvérisation nasale	           
+64	63728524	H	VALCADINO, solution pour application cutanée	           
+70	69600677	H	VERCOLVERTINE, solution pour application locale	           
+83	63855240	R	VOLTARENE EMULGEL 1 %, gel	           
+77	62938377	H	VORTIA 50 microgrammes/5 mg par mL, collyre en solution	           
+77	63781007	R	XALACOM 50 microgrammes/mL + 5 mg/mL, collyre en solution	           
+71	60047271	R	XALATAN 50 microgrammes/mL, collyre en solution	           
+73	66147346	H	ZAMELINE 1 mg/mL, collyre en solution	           

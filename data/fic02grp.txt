@@ -1,0 +1,50 @@
+756	85	Voie nasale	ACETONIDE DE TRIAMCINOLONE 55 microgrammes par dose - NASACORT 55 microgrammes par dose, suspension pour pulvérisation nasale
+753	79	Voie cutanée	ADAPALENE 1 mg pour 1 g + PEROXYDE DE BENZOYLE HYDRATE équivalent à PEROXYDE DE BENZOYLE 25 mg pour 1 g - EPIDUO 0,1 %/2,5 %, gel
+753	80	Voie cutanée	ADAPALENE 3 mg pour 1 g + PEROXYDE DE BENZOYLE HYDRATE équivalent à PEROXYDE DE BENZOYLE 25 mg pour 1 g - EPIDUO 0,3 %/2,5 %, gel
+534	42	Voie inhalée	BECLOMETASONE (DIPROPIONATE DE) 100 microgrammes/dose + FORMOTEROL (FUMARATE DE) DIHYDRATE 6 microgrammes/dose - INNOVAIR 100/6 microgrammes/dose, solution pour inhalation en flacon pressurisé
+534	47	Voie inhalée	BECLOMETASONE (DIPROPIONATE DE) 200 microgrammes/dose + FORMOTEROL (FUMARATE DE) DIHYDRATE microgrammes/dose - INNOVAIR 200/6 microgrammes/dose, solution pour inhalation en flacon pressurisé
+750	53	Voie cutanée	BIFONAZOLE 1 % - AMYCOR 1 POUR CENT, crème pour application locale
+563	58	Voie ophtalmique	BIMATOPROST + TIMOLOL (MALEATE DE) 0,3 mg/5 mg par mL - GANFORT 0,3 mg/ml + 5 mg/ml, collyre en solution
+535	54	Voie ophtalmique	BIMATOPROST 0,1 mg/mL - LUMIGAN 0,1 mg/ml, collyre en solution
+563	57	Voie ophtalmique	BIMATOPROST 0,3 mg/mL + TIMOLOL (MALEATE DE) 5 mg/mL - GANFORT 0,3 mg/ml + 5 mg/ml, collyre en solution en récipient unidose
+535	56	Voie ophtalmique	BIMATOPROST 0,3 mg/mL - LUMIGAN 0,3 mg/ml, collyre en solution
+535	55	Voie ophtalmique	BIMATOPROST 0,3 mg/mL - LUMIGAN 0,3 mg/ml, collyre en solution en récipient unidose
+286	61	Voie ophtalmique	BORAX  12 mg/mL +  BORIQUE (ACIDE) 18 mg/mL - DACRYOSERUM, solution pour lavage ophtalmique en récipient unidose
+564	62	Voie ophtalmique	BRIMONIDINE (TARTRATE DE) 2 mg/mL + TIMOLOL (MALEATE DE) équivalant à TIMOLOL 5 mg/ mL - COMBIGAN 2 mg/ml + 5 mg/ml, collyre en solution
+751	63	Voie ophtalmique	BRINZOLAMIDE 10 mg/mL + BRIMONIDINE (TARTRATE DE) 2 mg/mL - SIMBRINZA 10 mg/ml + 2 mg/ml, collyre en suspension
+660	59	Voie ophtalmique	BRINZOLAMIDE 10 mg/mL + TIMOLOL (MALEATE DE) 5 mg/mL - AZARGA 10 mg/ml + 5 mg/ml, collyre en suspension
+512	60	Voie ophtalmique	BRINZOLAMIDE 10 mg/mL - AZOPT 10 mg/ml, collyre en suspension
+591	68	Voie cutanée	CALCIPOTRIOL MONOHYDRATE équivalent à CALCIPOTRIOL 50 microgrammes/ 1g + DIPROPRIONATE DE BETAMETHASONE équivalent à BETHAMETHASONE 0,500 mg/1g - DAIVOBET 50 microgrammes/0,5 mg/g, pommade
+357	78	Voie buccale	CHLORHEXIDINE (DIGLUCONATE DE) 0,20 % - ELUDRILPERIO 0,20 %, solution pour bain de bouche
+538	64	Voie cutanée	CHLORHEXIDINE (DIGLUCONATE DE) 0,25 g/100 mL+ CHLORURE DE BENZALKONIUM 0,025 g/100 mL+ ALCOOL BENZYLIQUE 4 mL/100 mL - BISEPTINESPRAID, solution pour application cutanée
+538	70	Voie cutanée	CHLORHEXIDINE (DIGLUCONATE DE) 0,250 g/100 mL + CHLORURE DE BENZALKONIUM 0,025 g/100 mL+ ALCOOL BENZYLIQUE 4 mL/100 mL - BISEPTINE, solution pour application locale
+754	81	Voie nasale	CHLORHYDRATE D'AZELASTINE 137 microgrammes + PROPIONATE DE FLUTICASONE 50 microgrammes - DYMISTA 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale
+301	67	Voie cutanée	CICLOPIROX 80 mg/1g - ONYTEC 80 mg/g, vernis à ongle médicamenteux
+443	66	Voie cutanée	CICLOPIROX OLAMINE 1,5 g/100g - SEBIPROX 1,5 %, shampooing
+443	65	Voie cutanée	CICLOPIROX OLAMINE 1g/100g - 	MYCOSTER 1 pour cent, crème
+757	86	Voie auriculaire	CIPROFLOXACINE (CHLORHYDRATE DE) équivalent à CIPROFLOXACINE 3 mg pour 1 mL + DEXAMETHASONE 1 mg pour 1 mL - CILOXADEX 3 mg/1 mg par mL, suspension pour instillation auriculaire
+375	82	Voie cutanée	CLOBÉTASOL (PROPIONATE DE) 500 microgrammes/g - CLOBEX 500 microgrammes/g, shampooing
+263	83	Voie cutanée	DICLOFÉNAC (DE DIÉTHYLAMINE) équivalent à DICLOFENAC SODIQUE 1 g pour 100 g - VOLTARENE EMULGEL 1 %, gel
+755	84	Voie nasale	FLUTICASONE (FUROATE DE) 27,5 mg pour 1 pulvérisation - AVAMYS 27,5 microgrammes/pulvérisation, suspension pour pulvérisation nasale
+615	45	Voie inhalée	FLUTICASONE (PROPIONATE DE) 125 microgrammes/dose + SALMETEROL (XINAFOATE DE) équivalent à SALMETEROL 25 microgrammes/dose - SERETIDE 125 microgrammes/25 microgrammes/dose, suspension pour inhalation en flacon pressurisé avec valve doseuse
+615	46	Voie inhalée	FLUTICASONE (PROPIONATE DE) 250 microgrammes/dose + SALMETEROL (XINAFOATE DE) équivalent à SALMETEROL 25 microgrammes/dose - SERETIDE 250 microgrammes/25 microgrammes/dose, suspension pour inhalation en flacon pressurisé avec valve doseuse
+752	76	Voie inhalée	GLYCOPYRRONIUM (BROMURE DE) équivalent à GLYCOPYRRONIUM 44 microgrammes - SEEBRI BREEZHALER 44 microgrammes, poudre pour inhalation en gélule
+327	73	Voie ophtalmique	HEXAMIDINE (DIISÉTIONATE D') 1 mg/1 mL - DESOMEDINE 0,1 %, collyre en solution
+436	77	Voie ophtalmique	LATANOPROST  50 microgrammes/mL +  TIMOLOL (MALÉATE DE) équivalent à TIMOLOL 5 mg/mL - XALACOM 50 microgrammes/mL + 5 mg/mL, collyre en solution
+334	71	Voie ophtalmique	LATANOPROST 50 micrgrammes /1 mL - XALATAN 50 microgrammes/mL, collyre en solution
+167	72	Voie cutanée	MINOXIDIL 50 mg/1g - ALOSTIL 5 %, mousse pour application cutanée en flacon pressurisé
+643	75	Voie inhalée	PROPIONATE DE FLUTICASONE  50 microgrammes/dose + SALMETEROL (XINAFOATE DE) équivalant à SALMETEROL 25 microgrammes/dose - SERETIDE 50 microgrammes/25 microgrammes/dose, suspension pour inhalation en flacon pressurisé avec valve doseuse
+643	48	Voie inhalée	PROPIONATE DE FLUTICASONE 100 microgrammes/dose + SALMETEROL (XINAFOATE DE) 50 microgrammes/dose - SERETIDE DISKUS 100 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose
+643	51	Voie inhalée	PROPIONATE DE FLUTICASONE 125 microgrammes/dose  + SALMETEROL (XINAFOATE DE) 25 microgrammes/dose - SERETIDE 125 microgrammes/25 microgrammes/dose, suspension pour inhalation en flacon pressurisé avec valve doseuse
+749	43	Voie inhalée	PROPIONATE DE FLUTICASONE 125 microgrammes/dose, suspension pour inhalation en flacon pressurisé - FLIXOTIDE 125 microgrammes/dose, suspension pour inhalation en flacon pressurisé
+749	38	Voie inhalée	PROPIONATE DE FLUTICASONE 1mg - VELCADE 1 mg, poudre pour solution injectable
+643	52	Voie inhalée	PROPIONATE DE FLUTICASONE 250 microgrammes/dose  + SALMETEROL (XINAFOATE DE) 25 microgrammes/dose - SERETIDE 250 microgrammes/25 microgrammes/dose, suspension pour inhalation en flacon pressurisé avec valve doseuse
+643	49	Voie inhalée	PROPIONATE DE FLUTICASONE 250 microgrammes/dose  + SALMETEROL (XINAFOATE DE) 50 microgrammes/dose - SERETIDE DISKUS 250 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose
+749	44	Voie inhalée	PROPIONATE DE FLUTICASONE 250 microgrammes/dose, suspension pour inhalation en flacon pressurisé - FLIXOTIDE 250 microgrammes/dose, suspension pour inhalation en flacon pressurisé
+643	50	Voie inhalée	PROPIONATE DE FLUTICASONE 500 microgrammes/dose + SALMETEROL (XINAFOATE DE) 50 microgrammes/dose - SERETIDE DISKUS 500 microgrammes/50 microgrammes/dose, poudre pour inhalation en récipient unidose
+157	69	Voie ophtalmique	TIMOLOL (MALEATE DE) équivalent à TIMOLOL 1mg/1g - GELTIM LP 1 mg/g, gel ophtalmique en récipient unidose
+638	22	Voie inhalée	TIOTROPIUM (BROMURE DE) MONOHYDRATE équivalant à TIOTROPIUM 18 microgrammes - SPIRIVA 18 microgrammes, poudre pour inhalation en gélule
+627	87	Voie nasale	TIXOCORTOL (PIVALATE DE) 1 g pour 100 g - PIVALONE 1 POUR CENT, suspension nasale
+748	39	Voie inhalée	bromure de tiotropium monohydraté
+748	40	Voie inhalée	bromure de tiotropium monohydraté
+748	41	Voie inhalée	bromure de tiotropium monohydraté
