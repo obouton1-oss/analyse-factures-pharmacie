@@ -209,6 +209,36 @@ THIN_BORDER = Border(*(Side(style="thin", color="CCCCCC"),) * 4)
 EUR_FMT = '#,##0.00 €;(#,##0.00 €);"-"'
 PCT_FMT = '0.0%'
 
+# Palette de couleurs claires, une par génériqueur, réutilisée de façon cohérente
+# sur les onglets "CA par génériqueur" et "CA type x laboratoire" (le même
+# génériqueur a toujours la même couleur d'un onglet à l'autre).
+LABO_PALETTE = [
+    "FDEBD3",  # orange clair
+    "D6EAF8",  # bleu clair
+    "D5F5E3",  # vert clair
+    "FCF3CF",  # jaune clair
+    "F5EEF8",  # violet clair
+    "FADBD8",  # rose clair
+    "D1F2EB",  # turquoise clair
+    "EBDEF0",  # mauve clair
+    "E8F8F5",  # cyan clair
+    "FEF9E7",  # crème
+    "D4E6F1",  # bleu ciel
+    "E9F7EF",  # menthe
+    "FDF2E9",  # pêche
+    "F4ECF7",  # lavande
+]
+
+
+def build_labo_fill_map(genericqueurs):
+    """Associe une PatternFill claire à chaque génériqueur, de façon stable
+    (même génériqueur -> même couleur, quel que soit l'onglet)."""
+    fills = {}
+    for i, gq in enumerate(genericqueurs):
+        color = LABO_PALETTE[i % len(LABO_PALETTE)]
+        fills[gq] = PatternFill("solid", start_color=color, end_color=color)
+    return fills
+
 
 def style_header_row(ws, row, ncols, col_start=1):
     for c in range(col_start, col_start + ncols):
@@ -267,7 +297,7 @@ def build_sheet_detail(wb, all_rows):
     return ws, n
 
 
-def build_sheet_genericqueur(wb, n_detail):
+def build_sheet_genericqueur(wb, n_detail, labo_fills):
     ws = wb.create_sheet("CA par génériqueur")
     ws["A1"] = "CA par génériqueur — vue consolidée (toutes périodes confondues)"
     ws["A1"].font = TITLE_FONT
@@ -324,17 +354,21 @@ def build_sheet_genericqueur(wb, n_detail):
             ws.cell(row=row, column=col).number_format = EUR_FMT
         ws.cell(row=row, column=6, value=f"=D{row}/D${total_row}")
         ws.cell(row=row, column=6).number_format = PCT_FMT
+        gq_ligne = ws.cell(row=row, column=1).value
+        fill = labo_fills.get(gq_ligne)
         for c in range(1, len(headers) + 1):
             cell = ws.cell(row=row, column=c)
             if cell.font != BOLD_FONT:
                 cell.font = NORMAL_FONT
+            if fill is not None:
+                cell.fill = fill
 
     widths = {"A": 20, "B": 11, "C": 15, "D": 14, "E": 14, "F": 12, "G": 16, "H": 14, "I": 18, "J": 16}
     autosize(ws, widths)
     return ws
 
 
-def build_sheet_type_labo(wb, all_rows, n_detail, periodes):
+def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
     """
     Nouvelle vue demandée : CA par type de médicament x par laboratoire,
     avec détail mensuel (une colonne de 4 sous-mesures par période) et un
@@ -445,9 +479,12 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes):
         ws.cell(row=total_row, column=c0 + 2, value=f"={ca_cell}-{remise_cell}").font = BOLD_FONT
         ws.cell(row=total_row, column=c0 + 3, value=f"=IFERROR({remise_cell}/{ca_cell},0)").font = BOLD_FONT
 
-    # Mise en forme des nombres + police + fond gris sur la ligne total
+    # Mise en forme des nombres + police + fond gris sur la ligne total,
+    # fond couleur par génériqueur sur les lignes de données
     for row in range(first_data_row, total_row + 1):
         is_total = (row == total_row)
+        labo_ligne = ws.cell(row=row, column=1).value
+        fill = labo_fills.get(labo_ligne) if not is_total else None
         for periode in list(periodes) + ["__TOTAL__"]:
             c0 = period_col_start[periode] if periode != "__TOTAL__" else total_col_start
             ws.cell(row=row, column=c0).number_format = EUR_FMT
@@ -460,8 +497,11 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes):
                 cell.fill = TOTAL_FILL
                 if cell.font != BOLD_FONT:
                     cell.font = BOLD_FONT
-            elif cell.font not in (BOLD_FONT,):
-                cell.font = NORMAL_FONT
+            else:
+                if cell.font not in (BOLD_FONT,):
+                    cell.font = NORMAL_FONT
+                if fill is not None:
+                    cell.fill = fill
 
     widths = {"A": 18, "B": 22}
     for c in range(3, n_cols_total + 1):
@@ -710,9 +750,12 @@ def build_report(pdf_paths, data_dir, out_path):
     wb = Workbook()
     wb.remove(wb.active)
 
+    genericqueurs = sorted({v[0] for v in OFFRE_TO_GENERIQUEUR.values() if v[1] is True})
+    labo_fills = build_labo_fill_map(genericqueurs)
+
     _, n_detail = build_sheet_detail(wb, all_rows)
-    build_sheet_genericqueur(wb, n_detail)
-    build_sheet_type_labo(wb, all_rows, n_detail, periodes)
+    build_sheet_genericqueur(wb, n_detail, labo_fills)
+    build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills)
     _, n_fuite = build_sheet_fuite(wb, all_rows, catalog_biogaran)
     build_sheet_resume(wb, all_rows, n_fuite)
     build_sheet_methodologie(wb)
