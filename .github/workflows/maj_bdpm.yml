@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout du dépôt
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Télécharger les 3 fichiers BDPM (avec garde-fou anti-fichier-tronqué)
         run: |
