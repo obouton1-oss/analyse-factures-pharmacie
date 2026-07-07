@@ -57,10 +57,14 @@ class BDPM:
         self.cip13_to_taux_remb = {}
         self.cis_to_titulaire = {}
         self.cis_to_type_generique = {}  # 0=princeps, 1/2/4=générique
+        self.cis_to_groupe = {}          # CIS -> code groupe générique
+        self.groupe_to_cis = {}          # code groupe -> set(CIS)
+        self.groupe_libelle = {}         # code groupe -> libellé du groupe
 
         self._load_cis_cip(data_dir / "CIS_CIP_bdpm.txt")
         self._load_cis(data_dir / "CIS_bdpm.txt")
         self._load_cis_gener(data_dir / "CIS_GENER_bdpm.txt")
+        self._biogaran_groupes = self._compute_biogaran_groupes()
 
     def _load_cis_cip(self, path):
         with open(path, encoding="utf-8") as f:
@@ -88,8 +92,24 @@ class BDPM:
                 cols = line.rstrip("\n").split("\t")
                 if len(cols) < 4:
                     continue
-                cis, type_gen = cols[2], cols[3]
+                groupe_id, libelle, cis, type_gen = cols[0], cols[1], cols[2], cols[3]
                 self.cis_to_type_generique[cis] = type_gen.strip()
+                self.cis_to_groupe[cis] = groupe_id
+                self.groupe_to_cis.setdefault(groupe_id, set()).add(cis)
+                self.groupe_libelle.setdefault(groupe_id, libelle.strip())
+
+    def _compute_biogaran_groupes(self):
+        """Codes groupe générique pour lesquels BIOGARAN est titulaire d'au moins un CIS.
+        Sert de proxy pour 'ce générique est disponible chez Biogaran' (cf. limite
+        dans le docstring du module : le titulaire n'est pas toujours strictement
+        identique à la marque commerciale en cas de co-exploitation)."""
+        groupes = set()
+        for groupe_id, cis_set in self.groupe_to_cis.items():
+            for cis in cis_set:
+                if self.cis_to_titulaire.get(cis) == "BIOGARAN":
+                    groupes.add(groupe_id)
+                    break
+        return groupes
 
     # -----------------------------------------------------------------
     def fabricant(self, cip13: str):
@@ -118,6 +138,24 @@ class BDPM:
         remboursement = taux if taux else "Non remboursé (ou non renseigné)"
 
         return {"repertoire": repertoire, "remboursement": remboursement}
+
+    def groupe_generique(self, cip13: str):
+        """Retourne (code_groupe, libellé_groupe) ou (None, None) si hors répertoire."""
+        cis = self.cip13_to_cis.get(cip13)
+        if not cis:
+            return None, None
+        groupe_id = self.cis_to_groupe.get(cis)
+        if not groupe_id:
+            return None, None
+        return groupe_id, self.groupe_libelle.get(groupe_id)
+
+    def biogaran_disponible(self, cip13: str) -> bool:
+        """True si le groupe générique de ce CIP13 compte au moins un CIS dont
+        BIOGARAN est titulaire (donc un équivalent générique existe chez Biogaran)."""
+        groupe_id, _ = self.groupe_generique(cip13)
+        if not groupe_id:
+            return False
+        return groupe_id in self._biogaran_groupes
 
 
 if __name__ == "__main__":
