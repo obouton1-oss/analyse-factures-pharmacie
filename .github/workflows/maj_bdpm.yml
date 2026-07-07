@@ -1,0 +1,55 @@
+name: Mise à jour quotidienne des fichiers BDPM
+
+on:
+  schedule:
+    # 5h du matin (heure française, UTC+1/+2) -> 4h UTC en hiver, 3h UTC en été
+    - cron: "0 4 * * *"
+  workflow_dispatch: {}  # permet de le déclencher manuellement depuis l'onglet Actions
+
+jobs:
+  update-bdpm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout du dépôt
+        uses: actions/checkout@v4
+
+      - name: Télécharger les 3 fichiers BDPM (avec garde-fou anti-fichier-tronqué)
+        run: |
+          set -e
+          mkdir -p data
+
+          BASE_URL="https://base-donnees-publique.medicaments.gouv.fr/index.php/download/file"
+          FICHIERS="CIS_bdpm.txt CIS_CIP_bdpm.txt CIS_GENER_bdpm.txt"
+
+          for f in $FICHIERS; do
+            echo "Téléchargement de $f ..."
+            curl -sSL --fail -o "data/${f}.new" "${BASE_URL}/${f}"
+
+            TAILLE=$(stat -c%s "data/${f}.new" 2>/dev/null || stat -f%z "data/${f}.new")
+            echo "Taille reçue pour $f : ${TAILLE} octets"
+
+            # Garde-fou : un fichier BDPM valide fait au minimum 500 Ko.
+            # En dessous, on considère le téléchargement comme tronqué/invalide
+            # et on interrompt le job sans écraser le fichier existant.
+            if [ "$TAILLE" -lt 500000 ]; then
+              echo "::error::Fichier $f trop petit (${TAILLE} octets) — téléchargement probablement invalide. Abandon."
+              rm -f "data/${f}.new"
+              exit 1
+            fi
+
+            mv "data/${f}.new" "data/${f}"
+          done
+
+      - name: Commit si les fichiers ont changé
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add data/CIS_bdpm.txt data/CIS_CIP_bdpm.txt data/CIS_GENER_bdpm.txt
+
+          if git diff --cached --quiet; then
+            echo "Aucun changement dans les fichiers BDPM aujourd'hui."
+          else
+            git commit -m "Mise à jour automatique BDPM $(date +%Y-%m-%d)"
+            git push
+          fi
