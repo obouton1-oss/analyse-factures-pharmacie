@@ -50,13 +50,25 @@ jobs:
             exit 1
           fi
 
-          URL_GRP=$(grep -oE 'https://ansm\.sante\.fr/uploads/[0-9]{4}/[0-9]{2}/[0-9]{2}/fic02grp\.txt' /tmp/page_ansm.html | head -1)
-          URL_SPE=$(grep -oE 'https://ansm\.sante\.fr/uploads/[0-9]{4}/[0-9]{2}/[0-9]{2}/fic03spe\.txt' /tmp/page_ansm.html | head -1)
+          RAW_GRP=$(grep -oE '(https://ansm\.sante\.fr)?/uploads/[0-9]{4}/[0-9]{2}/[0-9]{2}/fic02grp\.txt' /tmp/page_ansm.html | head -1)
+          RAW_SPE=$(grep -oE '(https://ansm\.sante\.fr)?/uploads/[0-9]{4}/[0-9]{2}/[0-9]{2}/fic03spe\.txt' /tmp/page_ansm.html | head -1)
 
-          if [ -z "$URL_GRP" ] || [ -z "$URL_SPE" ]; then
+          if [ -z "$RAW_GRP" ] || [ -z "$RAW_SPE" ]; then
             echo "::error::Page ANSM récupérée (code 200) mais URLs introuvables dedans (structure de page changée). Abandon."
+            echo "--- Diagnostic : lignes de la page contenant 'fic02' ou 'fic03' ---"
+            grep -o '.\{80\}fic0[23].\{80\}' /tmp/page_ansm.html || echo "(aucune occurrence de fic02/fic03 trouvée dans la page)"
             exit 1
           fi
+
+          # Les URLs peuvent être relatives (/uploads/...) ou absolues -> on normalise en absolu
+          case "$RAW_GRP" in
+            http*) URL_GRP="$RAW_GRP" ;;
+            *) URL_GRP="https://ansm.sante.fr${RAW_GRP}" ;;
+          esac
+          case "$RAW_SPE" in
+            http*) URL_SPE="$RAW_SPE" ;;
+            *) URL_SPE="https://ansm.sante.fr${RAW_SPE}" ;;
+          esac
           echo "URL fic02grp.txt : $URL_GRP"
           echo "URL fic03spe.txt : $URL_SPE"
 
