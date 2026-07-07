@@ -155,13 +155,30 @@ def parse_bo_offrem(pdf_path):
     pdf = pdfplumber.open(pdf_path)
     for page_num, page in enumerate(pdf.pages, start=1):
         rows = get_rows(page)
+        n_rows = len(rows)
         for row_index, tokens in enumerate(rows):
             if not tokens:
                 continue
             first = tokens[0]["text"]
 
             if first == "Offre":
-                current_offre = " ".join(t["text"] for t in tokens[1:])
+                nom_offre = " ".join(t["text"] for t in tokens[1:]).strip()
+                if not nom_offre:
+                    # Cas observé sur certains mois (ex. mai 2026) : le mot "Offre"
+                    # est seul sur sa ligne, le nom réel de l'offre est sur la
+                    # ligne suivante (retour à la ligne dans le PDF). On va le
+                    # chercher sur la prochaine ligne non vide, à condition que
+                    # ce ne soit ni une ligne CIP13, ni "Total", ni "Offre".
+                    for lookahead in range(row_index + 1, min(row_index + 3, n_rows)):
+                        next_tokens = rows[lookahead]
+                        if not next_tokens:
+                            continue
+                        next_first = next_tokens[0]["text"]
+                        if CIP_RE.match(next_first) or next_first in ("Total", "Offre"):
+                            break
+                        nom_offre = " ".join(t["text"] for t in next_tokens).strip()
+                        break
+                current_offre = nom_offre
                 current_table_rows = []
                 continue
 
