@@ -38,7 +38,14 @@ OFFRE_TO_GENERIQUEUR = {
     # met toujours offre="BIOGARAN" (pas d'ambiguïté possible sur ce canal),
     # entrée explicite pour ne pas dépendre du filtre heuristique ci-dessous.
     "BIOGARAN": ("BIOGARAN", True),
+    # Clé virtuelle, jamais produite par un parser : sert uniquement à faire
+    # apparaître "Générique (labo non identifié)" (filet de sécurité BDPM du
+    # canal Alliance, cf. _resoudre_marque_alliance) dans les onglots de
+    # synthèse (CA par génériqueur, CA type x laboratoire), qui énumèrent
+    # les marques à partir de ce dictionnaire.
+    "__ALLIANCE_GENERIQUE_NON_IDENTIFIE__": ("Générique (labo non identifié)", True),
     "BIOGARAN Génériques RSF": ("BIOGARAN", True),
+    "OFFRE TRINARA RSF": ("EXELTIS", True),
     "EG LABO Génériques RSF": ("EG LABO", True),
     "EG LABO non remise": ("EG LABO", True),
     "SANDOZ Génériques RSF": ("SANDOZ", True),
@@ -154,11 +161,15 @@ def type_medicament(repertoire):
     return repertoire or "Hors répertoire"
 
 
-def _enrichir_ligne(r, periode, canal, bdpm):
-    """Enrichissement commun à tous les canaux : classification génériqueur
-    (via le champ `offre`, quel que soit le canal qui l'a rempli) + BDPM
-    (répertoire, hybride, remboursement, fabricant titulaire)."""
-    brand, is_gen = classify_offre(r["offre"])
+def _enrichir_ligne(r, periode, canal, bdpm, brand, is_gen):
+    """Enrichissement commun à tous les canaux : BDPM (répertoire, hybride,
+    remboursement, fabricant titulaire). La résolution marque/génériqueur
+    (brand, is_gen) est calculée en amont, différemment selon le canal :
+    - OCP : classify_offre(offre) — traduit un nom d'offre commerciale
+    - Biogaran Direct : toujours ("BIOGARAN", True), sans ambiguïté
+    - Alliance : _resoudre_marque_alliance() — mot-clé désignation déjà
+      résolu par le parser, filet de sécurité BDPM en second recours
+    """
     nat = bdpm.nature(r["cip13"])
     groupe_id, groupe_libelle = bdpm.groupe_generique(r["cip13"])
     hyb = nat.get("hybride") or {}
@@ -189,12 +200,14 @@ def enrich_rows_ocp(pdf_paths, bdpm):
             for a in anomalies[:10]:
                 print("   ", a, file=sys.stderr)
         for r in rows:
-            all_rows.append(_enrichir_ligne(r, periode, "OCP", bdpm))
+            brand, is_gen = classify_offre(r["offre"])
+            all_rows.append(_enrichir_ligne(r, periode, "OCP", bdpm, brand, is_gen))
     return all_rows
 
 
 def enrich_rows_biogaran_direct(pdf_paths, bdpm):
-    """Canal Biogaran Direct : un PDF = une facture de livraison unitaire."""
+    """Canal Biogaran Direct : un PDF = une facture de livraison unitaire.
+    Génériqueur toujours BIOGARAN (pas d'ambiguïté sur ce canal)."""
     from parser_biogaran_direct import extraire_facture_biogaran_direct
     all_rows = []
     for pdf_path in pdf_paths:
@@ -203,17 +216,51 @@ def enrich_rows_biogaran_direct(pdf_paths, bdpm):
             print(f"⚠️  Aucune ligne produit trouvée dans {pdf_path}", file=sys.stderr)
         periode = periode_depuis_date_facture(facture["date_facture"])
         for r in facture["lignes"]:
-            all_rows.append(_enrichir_ligne(r, periode, "Biogaran Direct", bdpm))
+            all_rows.append(_enrichir_ligne(r, periode, "Biogaran Direct", bdpm, "BIOGARAN", True))
     return all_rows
 
 
-def enrich_rows(ocp_pdfs, bdpm, biogaran_direct_pdfs=None):
+def _resoudre_marque_alliance(r, bdpm):
+    """Résout la marque génériqueur d'une ligne Alliance.
+    Priorité au mot-clé de désignation déjà détecté par parser_alliance.py
+    (reflète la marque réellement imprimée sur le produit — fiable). À
+    défaut, filet de sécurité BDPM : si le CIP13 est officiellement au
+    répertoire générique (source ANSM, indépendante de la marque), on le
+    signale comme "Générique (labo non identifié)" plutôt que de le perdre
+    silencieusement parmi les princeps/dispositifs — ça évite de sous-
+    estimer la fuite et donne une liste concrète pour enrichir les mots-clés."""
+    if r["offre"]:
+        return r["offre"], True
+    nat = bdpm.nature(r["cip13"])
+    if nat["repertoire"] == "Générique (répertoire)":
+        return "Générique (labo non identifié)", True
+    return None, False
+
+
+def enrich_rows_alliance(pdf_paths, bdpm):
+    """Canal Alliance : un PDF = une facture grossiste multi-génériqueurs."""
+    from parser_alliance import extraire_facture_alliance
+    all_rows = []
+    for pdf_path in pdf_paths:
+        facture = extraire_facture_alliance(pdf_path)
+        if not facture["lignes"]:
+            print(f"⚠️  Aucune ligne produit trouvée dans {pdf_path}", file=sys.stderr)
+        periode = periode_depuis_date_facture(facture["date_facture"])
+        for r in facture["lignes"]:
+            brand, is_gen = _resoudre_marque_alliance(r, bdpm)
+            all_rows.append(_enrichir_ligne(r, periode, "Alliance", bdpm, brand, is_gen))
+    return all_rows
+
+
+def enrich_rows(ocp_pdfs, bdpm, biogaran_direct_pdfs=None, alliance_pdfs=None):
     """Point d'entrée multi-canal : agrège les lignes enrichies de chaque
     canal fourni. `ocp_pdfs` reste le paramètre historique (positionnel,
     compatible avec les appels existants) ; les autres canaux sont optionnels."""
     all_rows = enrich_rows_ocp(ocp_pdfs, bdpm)
     if biogaran_direct_pdfs:
         all_rows.extend(enrich_rows_biogaran_direct(biogaran_direct_pdfs, bdpm))
+    if alliance_pdfs:
+        all_rows.extend(enrich_rows_alliance(alliance_pdfs, bdpm))
     return all_rows
 
 
@@ -346,14 +393,12 @@ def build_sheet_detail(wb, all_rows):
     return ws, n
 
 
-def build_sheet_genericqueur(wb, n_detail, labo_fills):
+def build_sheet_genericqueur(wb, n_detail, labo_fills, genericqueurs):
     ws = wb.create_sheet("CA par génériqueur")
     ws["A1"] = "CA par génériqueur — vue consolidée (toutes périodes confondues)"
     ws["A1"].font = TITLE_FONT
     ws["A2"] = "Calculé par formules SUMIF/COUNTIF depuis l'onglet 'Détail lignes'"
     ws["A2"].font = SUBTITLE_FONT
-
-    genericqueurs = sorted({v[0] for v in OFFRE_TO_GENERIQUEUR.values() if v[1] is True})
 
     headers = ["Génériqueur", "Nb lignes", "Qté fact totale", "CA PPHT (€)",
                "Remise HT (€)", "% du CA génériqueurs", "CA Répertoire (€)",
@@ -789,9 +834,9 @@ def build_sheet_methodologie(wb):
     return ws
 
 
-def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None):
+def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, alliance_pdfs=None):
     bdpm = BDPM(data_dir)
-    all_rows = enrich_rows(pdf_paths, bdpm, biogaran_direct_pdfs=biogaran_direct_pdfs)
+    all_rows = enrich_rows(pdf_paths, bdpm, biogaran_direct_pdfs=biogaran_direct_pdfs, alliance_pdfs=alliance_pdfs)
     catalog_biogaran = compute_biogaran_catalog(all_rows)
     fuite_rows = compute_fuite(all_rows, catalog_biogaran)
     periodes = sorted({r["periode"] for r in all_rows}, key=periode_sort_key)
@@ -799,11 +844,14 @@ def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None):
     wb = Workbook()
     wb.remove(wb.active)
 
-    genericqueurs = sorted({v[0] for v in OFFRE_TO_GENERIQUEUR.values() if v[1] is True})
+    genericqueurs = sorted(
+        {v[0] for v in OFFRE_TO_GENERIQUEUR.values() if v[1] is True}
+        | {r["genericqueur"] for r in all_rows if r["est_genericqueur"] is True and r["genericqueur"]}
+    )
     labo_fills = build_labo_fill_map(genericqueurs)
 
     _, n_detail = build_sheet_detail(wb, all_rows)
-    build_sheet_genericqueur(wb, n_detail, labo_fills)
+    build_sheet_genericqueur(wb, n_detail, labo_fills, genericqueurs)
     build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills)
     _, n_fuite = build_sheet_fuite(wb, all_rows, catalog_biogaran)
     build_sheet_resume(wb, all_rows, n_fuite)
@@ -829,5 +877,8 @@ if __name__ == "__main__":
     ap.add_argument("--out", default="rapport_pharmacie.xlsx", help="Fichier Excel de sortie")
     ap.add_argument("--biogaran-direct", nargs="*", default=None,
                      help="Un ou plusieurs PDF de factures Biogaran Direct (canal Biogaran Direct)")
+    ap.add_argument("--alliance", nargs="*", default=None,
+                     help="Un ou plusieurs PDF de factures Alliance Healthcare (canal Alliance)")
     args = ap.parse_args()
-    build_report(args.pdfs, args.data, args.out, biogaran_direct_pdfs=args.biogaran_direct)
+    build_report(args.pdfs, args.data, args.out,
+                  biogaran_direct_pdfs=args.biogaran_direct, alliance_pdfs=args.alliance)
