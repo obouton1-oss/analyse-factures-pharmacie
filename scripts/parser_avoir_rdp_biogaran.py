@@ -36,11 +36,18 @@ Circuits d'achat (astérisques du document) :
     - "GROSSISTES**" = achats combinés OCP + Alliance (répartiteurs pharmaceutiques)
     - "DIRECTS*"     = achats canal Biogaran Direct (dépositaires)
 
-Règle métier confirmée par le pharmacien : la RDP ramène la remise cumulée à
-40 % sur les médicaments Biogaran remboursables déjà remisés à 10/20/30 % sur
-facture d'achat (plafond légal art. L138-9 CSS sur les génériques
-remboursables) :
-    taux_remise_facture_attendu = 40 - taux_rdp
+Règle métier (révisée le 08/07/2026, confirmée par le pharmacien après
+recoupement chiffré sur les 5 avoirs réels + Détail lignes du pipeline —
+cf. onglet Contrôle RDP Biogaran) : la RDP ramène la remise cumulée à 30 %
+(et non 40 % comme supposé initialement) sur les médicaments Biogaran
+remboursables déjà remisés à 10/20 % sur facture d'achat (plafond légal
+art. L138-9 CSS sur les génériques remboursables) :
+    taux_remise_facture_attendu = 30 - taux_rdp
+
+⚠️ Résidu non expliqué de l'ordre de 5 à 12 % entre CA de référence de
+l'avoir et CA recalculé par le pipeline même avec cette règle corrigée —
+chantier mis en pause, à creuser plus tard (liste exacte des spécialités
+concernées à demander à Biogaran).
 
 Segmentation robuste par occurrence de "RDP X%" (plutôt que par adjacence de
 mots-clés, fragile face à l'entrelacement de colonnes pdfplumber) : chaque
@@ -110,7 +117,7 @@ def extraire_avoir_rdp(path_pdf):
                 {
                     "taux_rdp": float, "circuit": "Grossistes"|"Directs",
                     "canaux": [...],  # canaux concernés par ce circuit
-                    "taux_remise_facture_attendu": float,  # 40 - taux_rdp
+                    "taux_remise_facture_attendu": float,  # 30 - taux_rdp
                     "montant_remise_ht": float,  # négatif
                     "ca_brut_reference": float,  # positif
                     "num_document": str, "date_document": str, "periode": str,
@@ -145,7 +152,7 @@ def extraire_avoir_rdp(path_pdf):
             "taux_rdp": taux_rdp,
             "circuit": circuit,
             "canaux": CIRCUIT_TO_CANAUX[circuit],
-            "taux_remise_facture_attendu": round(40 - taux_rdp, 2) if taux_rdp is not None else None,
+            "taux_remise_facture_attendu": round(30 - taux_rdp, 2) if taux_rdp is not None else None,
             "montant_remise_ht": montant_remise_ht,
             "ca_brut_reference": ca_brut_reference,
             "num_document": num_document,

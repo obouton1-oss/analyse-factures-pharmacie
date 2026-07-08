@@ -775,21 +775,21 @@ def build_sheet_fuite(wb, all_rows, catalog_biogaran):
 # contrôle éprouvé sur plusieurs mois.
 SEUIL_ECART_RDP_EUR = 5.0
 SEUIL_ECART_RDP_PCT = 0.03
-TOLERANCE_TAUX_REMISE = 0.5  # points de %, pour apparier taux_remise facture ~ 40 - taux_rdp
+TOLERANCE_TAUX_REMISE = 0.5  # points de %, pour apparier taux_remise facture ~ 30 - taux_rdp
 
 
 def build_sheet_controle_rdp(wb, all_rows, avoir_lignes):
     """Pour chaque bloc RDP (taux x circuit x période) d'un avoir Biogaran,
     reconstitue le CA brut correspondant à partir du pipeline (génériqueur
     BIOGARAN, période et canaux du bon circuit, taux de remise facture
-    attendu = 40 - taux RDP) et le compare au « CA brut de référence »
+    attendu = 30 - taux RDP) et le compare au « CA brut de référence »
     imprimé sur l'avoir."""
     ws = wb.create_sheet("Contrôle RDP Biogaran")
     ws["A1"] = "Contrôle RDP Biogaran — CA brut de référence (avoir) vs CA calculé (pipeline)"
     ws["A1"].font = TITLE_FONT
     ws["A2"] = ("Un écart peut venir d'une facture manquante sur un canal, d'une période de "
                 "référence décalée par rapport aux dates de facture, ou d'une remise non conforme "
-                "à 40 - taux RDP. Voir onglet Méthodologie.")
+                "à 30 - taux RDP. Voir onglet Méthodologie.")
     ws["A2"].font = SUBTITLE_FONT
 
     headers = [
