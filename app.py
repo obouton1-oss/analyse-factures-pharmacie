@@ -199,10 +199,11 @@ with col1:
     st.markdown('<div class="canal-card" style="--accent:#2E86C1">', unsafe_allow_html=True)
     st.markdown("### 📋 OCP")
     st.markdown('<div class="sub">Récapitulatifs mensuels BO-OFFREM — PDF individuels ou dossier zippé</div>', unsafe_allow_html=True)
-    ocp_raw = st.file_uploader(
-        "PDF OCP", type=["pdf", "zip"], accept_multiple_files=True,
-        key=f"ocp_{k}", label_visibility="collapsed",
-    )
+    with st.container(height=180, border=False):
+        ocp_raw = st.file_uploader(
+            "PDF OCP", type=["pdf", "zip"], accept_multiple_files=True,
+            key=f"ocp_{k}", label_visibility="collapsed",
+        )
     ocp_files = expand_uploads(ocp_raw)
     st.caption(f"{len(ocp_files)} PDF détecté(s)" if ocp_files else "Aucun fichier pour l'instant")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -211,10 +212,11 @@ with col2:
     st.markdown('<div class="canal-card" style="--accent:#28B463">', unsafe_allow_html=True)
     st.markdown("### 🏥 Alliance Healthcare")
     st.markdown('<div class="sub">Factures grossiste (relevés mensuels ignorés automatiquement) — PDF individuels ou dossier zippé</div>', unsafe_allow_html=True)
-    alliance_raw = st.file_uploader(
-        "PDF Alliance", type=["pdf", "zip"], accept_multiple_files=True,
-        key=f"alliance_{k}", label_visibility="collapsed",
-    )
+    with st.container(height=180, border=False):
+        alliance_raw = st.file_uploader(
+            "PDF Alliance", type=["pdf", "zip"], accept_multiple_files=True,
+            key=f"alliance_{k}", label_visibility="collapsed",
+        )
     alliance_files = expand_uploads(alliance_raw)
     st.caption(f"{len(alliance_files)} PDF détecté(s)" if alliance_files else "Aucun fichier pour l'instant")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -223,10 +225,11 @@ with col3:
     st.markdown('<div class="canal-card" style="--accent:#E67E22">', unsafe_allow_html=True)
     st.markdown("### 💊 Biogaran Direct")
     st.markdown('<div class="sub">Factures (facture_*.pdf) + avoirs RDP (avoir_*.pdf) — triés automatiquement, PDF individuels ou dossier zippé</div>', unsafe_allow_html=True)
-    biogaran_raw = st.file_uploader(
-        "PDF Biogaran", type=["pdf", "zip"], accept_multiple_files=True,
-        key=f"biogaran_{k}", label_visibility="collapsed",
-    )
+    with st.container(height=180, border=False):
+        biogaran_raw = st.file_uploader(
+            "PDF Biogaran", type=["pdf", "zip"], accept_multiple_files=True,
+            key=f"biogaran_{k}", label_visibility="collapsed",
+        )
     biogaran_files = expand_uploads(biogaran_raw)
     n_fact = sum(1 for nom, _ in biogaran_files if nom.lower().startswith("facture_"))
     n_avoir = sum(1 for nom, _ in biogaran_files if nom.lower().startswith("avoir_"))
