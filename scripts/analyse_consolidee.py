@@ -482,6 +482,14 @@ def build_sheet_genericqueur(wb, n_detail, labo_fills, genericqueurs):
     return ws
 
 
+# Canaux détaillés pour le laboratoire Biogaran uniquement (cf. demande
+# pharmacien) dans l'onglet "CA type x laboratoire" : une ligne par canal en
+# plus de la ligne agrégée "Total", pour voir comment chaque catégorie de
+# médicament Biogaran (générique répertoire, hors répertoire, hybride...)
+# se répartit entre les 3 flux d'approvisionnement.
+CANAUX_BIOGARAN_DETAIL = ["OCP", "Alliance", "Biogaran Direct"]
+
+
 def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
     """
     Nouvelle vue demandée : CA par type de médicament x par laboratoire,
@@ -490,20 +498,28 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
     Sous-mesures par période : CA brut (= CA PPHT), Remise HT, CA remisé
     (= CA PPHT − Remise HT, hypothèse à confirmer — voir onglet Méthodologie),
     Taux de remise pondéré (= Remise HT / CA PPHT).
+
+    Pour BIOGARAN uniquement, chaque type de médicament est en plus détaillé
+    par canal (OCP / Alliance / Biogaran Direct + une ligne Total) — voir
+    CANAUX_BIOGARAN_DETAIL. Les autres laboratoires gardent une seule ligne
+    agrégée, comme avant.
     """
     ws = wb.create_sheet("CA type x laboratoire")
     ws["A1"] = "CA par type de médicament et par laboratoire — détail mensuel"
     ws["A1"].font = TITLE_FONT
     ws["A2"] = ("CA remisé = CA PPHT − Remise HT (hypothèse de calcul à confirmer, "
                 "voir onglet Méthodologie). Ne couvre que les lignes génériqueur "
-                "(hors dispositifs/nutrition/parapharmacie).")
+                "(hors dispositifs/nutrition/parapharmacie). Pour Biogaran, détail "
+                "par canal (OCP / Alliance / Biogaran Direct) sous chaque type de "
+                "médicament ; la ligne « Total » reprend l'agrégat des 3 canaux.")
     ws["A2"].font = SUBTITLE_FONT
 
     detail_sheet = "'Détail lignes'"
-    col_labo, col_type = "D", "F"
+    col_labo, col_type, col_canal = "D", "F", "R"
     col_periode, col_ca, col_remise = "A", "L", "N"
     rng_labo = f"{detail_sheet}!${col_labo}$2:${col_labo}${n_detail}"
     rng_type = f"{detail_sheet}!${col_type}$2:${col_type}${n_detail}"
+    rng_canal = f"{detail_sheet}!${col_canal}$2:${col_canal}${n_detail}"
     rng_periode = f"{detail_sheet}!${col_periode}$2:${col_periode}${n_detail}"
     rng_ca = f"{detail_sheet}!${col_ca}$2:${col_ca}${n_detail}"
     rng_remise = f"{detail_sheet}!${col_remise}$2:${col_remise}${n_detail}"
@@ -511,11 +527,13 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
     header_row1, header_row2 = 4, 5
     ws.cell(row=header_row1, column=1, value="Laboratoire")
     ws.cell(row=header_row1, column=2, value="Type de médicament")
+    ws.cell(row=header_row1, column=3, value="Canal (Biogaran uniquement)")
     ws.merge_cells(start_row=header_row1, start_column=1, end_row=header_row2, end_column=1)
     ws.merge_cells(start_row=header_row1, start_column=2, end_row=header_row2, end_column=2)
+    ws.merge_cells(start_row=header_row1, start_column=3, end_row=header_row2, end_column=3)
 
     sub_labels = ["CA brut (€)", "Remise (€)", "CA remisé (€)", "Taux remise pondéré"]
-    col = 3
+    col = 4
     period_col_start = {}
     for periode in periodes:
         period_col_start[periode] = col
@@ -546,20 +564,40 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
         for r in all_rows if r["est_genericqueur"] is True
     })
 
+    # Construit la liste finale des lignes à afficher : (labo, type_med, canal).
+    # canal = None -> ligne agrégée classique (tous laboratoires hors Biogaran).
+    # Pour Biogaran : une ligne par canal de CANAUX_BIOGARAN_DETAIL, puis une
+    # ligne canal="Total" qui reprend l'agrégat (identique à l'ancien comportement).
+    lignes_a_afficher = []
+    for labo, type_med in combos:
+        if labo == "BIOGARAN":
+            for canal in CANAUX_BIOGARAN_DETAIL:
+                lignes_a_afficher.append((labo, type_med, canal))
+            lignes_a_afficher.append((labo, type_med, "Total"))
+        else:
+            lignes_a_afficher.append((labo, type_med, None))
+
     first_data_row = header_row2 + 1
-    for i, (labo, type_med) in enumerate(combos):
+    for i, (labo, type_med, canal) in enumerate(lignes_a_afficher):
         row = first_data_row + i
         ws.cell(row=row, column=1, value=labo)
         ws.cell(row=row, column=2, value=type_med)
+        ws.cell(row=row, column=3, value=canal if canal else "")
+
+        # Critère canal additionnel uniquement sur les lignes de détail par
+        # canal (OCP/Alliance/Biogaran Direct) ; les lignes "Total" et les
+        # lignes des autres laboratoires restent agrégées tous canaux, comme
+        # avant.
+        canal_crit = f',{rng_canal},"{canal}"' if canal in CANAUX_BIOGARAN_DETAIL else ""
 
         for periode in periodes:
             c0 = period_col_start[periode]
             ca_cell = f"{get_column_letter(c0)}{row}"
             remise_cell = f"{get_column_letter(c0 + 1)}{row}"
             ws.cell(row=row, column=c0,
-                    value=f'=SUMIFS({rng_ca},{rng_labo},$A{row},{rng_type},$B{row},{rng_periode},"{periode}")')
+                    value=f'=SUMIFS({rng_ca},{rng_labo},$A{row},{rng_type},$B{row},{rng_periode},"{periode}"{canal_crit})')
             ws.cell(row=row, column=c0 + 1,
-                    value=f'=SUMIFS({rng_remise},{rng_labo},$A{row},{rng_type},$B{row},{rng_periode},"{periode}")')
+                    value=f'=SUMIFS({rng_remise},{rng_labo},$A{row},{rng_type},$B{row},{rng_periode},"{periode}"{canal_crit})')
             ws.cell(row=row, column=c0 + 2, value=f"={ca_cell}-{remise_cell}")
             ws.cell(row=row, column=c0 + 3, value=f"=IFERROR({remise_cell}/{ca_cell},0)")
 
@@ -570,34 +608,43 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
         # de période (donc robuste même si une période n'est pas dans `periodes`,
         # ex. période "Inconnu" faute de PDF exploitable pour un mois donné).
         ws.cell(row=row, column=c0,
-                value=f'=SUMIFS({rng_ca},{rng_labo},$A{row},{rng_type},$B{row})')
+                value=f'=SUMIFS({rng_ca},{rng_labo},$A{row},{rng_type},$B{row}{canal_crit})')
         ws.cell(row=row, column=c0 + 1,
-                value=f'=SUMIFS({rng_remise},{rng_labo},$A{row},{rng_type},$B{row})')
+                value=f'=SUMIFS({rng_remise},{rng_labo},$A{row},{rng_type},$B{row}{canal_crit})')
         ws.cell(row=row, column=c0 + 2, value=f"={ca_cell}-{remise_cell}")
         ws.cell(row=row, column=c0 + 3, value=f"=IFERROR({remise_cell}/{ca_cell},0)")
 
-    last_row = first_data_row + len(combos) - 1
+    last_row = first_data_row + len(lignes_a_afficher) - 1
 
-    # Ligne TOTAL GÉNÉRAL
+    # Ligne TOTAL GÉNÉRAL — exclut explicitement les lignes de détail par canal
+    # Biogaran (OCP/Alliance/Biogaran Direct) pour ne pas compter 3 fois le CA
+    # déjà inclus dans la ligne "Total" de chaque type de médicament Biogaran.
     total_row = last_row + 1
     ws.cell(row=total_row, column=1, value="TOTAL GÉNÉRAL").font = BOLD_FONT
-    ws.merge_cells(start_row=total_row, start_column=1, end_row=total_row, end_column=2)
+    ws.merge_cells(start_row=total_row, start_column=1, end_row=total_row, end_column=3)
+    exclusion_canaux = "".join(f',{get_column_letter(3)}{first_data_row}:{get_column_letter(3)}{last_row},"<>{c}"'
+                                for c in CANAUX_BIOGARAN_DETAIL)
     for periode in list(periodes) + ["__TOTAL__"]:
         c0 = period_col_start[periode] if periode != "__TOTAL__" else total_col_start
         for offset in (0, 1):  # CA brut, Remise : sommables
             letter = get_column_letter(c0 + offset)
             ws.cell(row=total_row, column=c0 + offset,
-                    value=f"=SUM({letter}{first_data_row}:{letter}{last_row})").font = BOLD_FONT
+                    value=f"=SUMIFS({letter}{first_data_row}:{letter}{last_row}{exclusion_canaux})").font = BOLD_FONT
         ca_cell = f"{get_column_letter(c0)}{total_row}"
         remise_cell = f"{get_column_letter(c0 + 1)}{total_row}"
         ws.cell(row=total_row, column=c0 + 2, value=f"={ca_cell}-{remise_cell}").font = BOLD_FONT
         ws.cell(row=total_row, column=c0 + 3, value=f"=IFERROR({remise_cell}/{ca_cell},0)").font = BOLD_FONT
 
     # Mise en forme des nombres + police + fond gris sur la ligne total,
-    # fond couleur par génériqueur sur les lignes de données
+    # fond couleur par génériqueur sur les lignes de données. Les lignes de
+    # détail par canal Biogaran sont en italique (sous-détail), la ligne
+    # "Total" Biogaran repasse en gras (comme l'ancienne ligne unique).
     for row in range(first_data_row, total_row + 1):
         is_total = (row == total_row)
         labo_ligne = ws.cell(row=row, column=1).value
+        canal_ligne = ws.cell(row=row, column=3).value
+        is_canal_detail = canal_ligne in CANAUX_BIOGARAN_DETAIL
+        is_sous_total_biogaran = (canal_ligne == "Total")
         fill = labo_fills.get(labo_ligne) if not is_total else None
         for periode in list(periodes) + ["__TOTAL__"]:
             c0 = period_col_start[periode] if periode != "__TOTAL__" else total_col_start
@@ -612,16 +659,20 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
                 if cell.font != BOLD_FONT:
                     cell.font = BOLD_FONT
             else:
-                if cell.font not in (BOLD_FONT,):
+                if is_canal_detail:
+                    cell.font = Font(name=FONT_NAME, italic=True, size=9, color="555555")
+                elif is_sous_total_biogaran:
+                    cell.font = BOLD_FONT
+                elif cell.font not in (BOLD_FONT,):
                     cell.font = NORMAL_FONT
                 if fill is not None:
                     cell.fill = fill
 
-    widths = {"A": 18, "B": 22}
-    for c in range(3, n_cols_total + 1):
+    widths = {"A": 18, "B": 22, "C": 16}
+    for c in range(4, n_cols_total + 1):
         widths[get_column_letter(c)] = 13
     autosize(ws, widths)
-    ws.freeze_panes = f"C{first_data_row}"
+    ws.freeze_panes = f"D{first_data_row}"
     return ws
 
 
