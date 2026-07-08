@@ -34,6 +34,10 @@ from bdpm import BDPM
 # pas dans cette table, elles ressortiront comme "À CLASSIFIER" dans le
 # rapport — il suffit alors d'ajouter une ligne ci-dessous.
 OFFRE_TO_GENERIQUEUR = {
+    # Canal Biogaran Direct (factures unitaires CSP/Movianto) : le parser
+    # met toujours offre="BIOGARAN" (pas d'ambiguïté possible sur ce canal),
+    # entrée explicite pour ne pas dépendre du filtre heuristique ci-dessous.
+    "BIOGARAN": ("BIOGARAN", True),
     "BIOGARAN Génériques RSF": ("BIOGARAN", True),
     "EG LABO Génériques RSF": ("EG LABO", True),
     "EG LABO non remise": ("EG LABO", True),
@@ -112,6 +116,18 @@ def detect_periode(pdf_path):
     return "Inconnu"
 
 
+def periode_depuis_date_facture(date_facture):
+    """Convertit une date 'JJ/MM/AAAA' (ex: facture Biogaran Direct/Alliance)
+    en période 'MM/AAAA', cohérente avec detect_periode() (canal OCP)."""
+    if not date_facture or "/" not in date_facture:
+        return "Inconnu"
+    parts = date_facture.split("/")
+    if len(parts) != 3:
+        return "Inconnu"
+    _, mm, aaaa = parts
+    return f"{int(mm):02d}/{aaaa}"
+
+
 def periode_sort_key(periode):
     """Clé de tri chronologique pour une période 'MM/AAAA' (les périodes
     'Inconnu' sont reléguées à la fin)."""
@@ -138,7 +154,32 @@ def type_medicament(repertoire):
     return repertoire or "Hors répertoire"
 
 
-def enrich_rows(pdf_paths, bdpm):
+def _enrichir_ligne(r, periode, canal, bdpm):
+    """Enrichissement commun à tous les canaux : classification génériqueur
+    (via le champ `offre`, quel que soit le canal qui l'a rempli) + BDPM
+    (répertoire, hybride, remboursement, fabricant titulaire)."""
+    brand, is_gen = classify_offre(r["offre"])
+    nat = bdpm.nature(r["cip13"])
+    groupe_id, groupe_libelle = bdpm.groupe_generique(r["cip13"])
+    hyb = nat.get("hybride") or {}
+    return {
+        **r,
+        "periode": periode,
+        "canal": canal,
+        "genericqueur": brand,
+        "est_genericqueur": is_gen,
+        "repertoire": nat["repertoire"],
+        "type_medicament": type_medicament(nat["repertoire"]),
+        "remboursement": nat["remboursement"],
+        "hybride_role": hyb.get("role") or "",
+        "groupe_id": groupe_id,
+        "groupe_libelle": groupe_libelle,
+        "fabricant_titulaire": bdpm.fabricant(r["cip13"]),
+    }
+
+
+def enrich_rows_ocp(pdf_paths, bdpm):
+    """Canal OCP : un PDF = un récap mensuel BO-OFFREM (multi-offres)."""
     all_rows = []
     for pdf_path in pdf_paths:
         periode = detect_periode(pdf_path)
@@ -148,23 +189,31 @@ def enrich_rows(pdf_paths, bdpm):
             for a in anomalies[:10]:
                 print("   ", a, file=sys.stderr)
         for r in rows:
-            brand, is_gen = classify_offre(r["offre"])
-            nat = bdpm.nature(r["cip13"])
-            groupe_id, groupe_libelle = bdpm.groupe_generique(r["cip13"])
-            hyb = nat.get("hybride") or {}
-            all_rows.append({
-                **r,
-                "periode": periode,
-                "genericqueur": brand,
-                "est_genericqueur": is_gen,
-                "repertoire": nat["repertoire"],
-                "type_medicament": type_medicament(nat["repertoire"]),
-                "remboursement": nat["remboursement"],
-                "hybride_role": hyb.get("role") or "",
-                "groupe_id": groupe_id,
-                "groupe_libelle": groupe_libelle,
-                "fabricant_titulaire": bdpm.fabricant(r["cip13"]),
-            })
+            all_rows.append(_enrichir_ligne(r, periode, "OCP", bdpm))
+    return all_rows
+
+
+def enrich_rows_biogaran_direct(pdf_paths, bdpm):
+    """Canal Biogaran Direct : un PDF = une facture de livraison unitaire."""
+    from parser_biogaran_direct import extraire_facture_biogaran_direct
+    all_rows = []
+    for pdf_path in pdf_paths:
+        facture = extraire_facture_biogaran_direct(pdf_path)
+        if not facture["lignes"]:
+            print(f"⚠️  Aucune ligne produit trouvée dans {pdf_path}", file=sys.stderr)
+        periode = periode_depuis_date_facture(facture["date_facture"])
+        for r in facture["lignes"]:
+            all_rows.append(_enrichir_ligne(r, periode, "Biogaran Direct", bdpm))
+    return all_rows
+
+
+def enrich_rows(ocp_pdfs, bdpm, biogaran_direct_pdfs=None):
+    """Point d'entrée multi-canal : agrège les lignes enrichies de chaque
+    canal fourni. `ocp_pdfs` reste le paramètre historique (positionnel,
+    compatible avec les appels existants) ; les autres canaux sont optionnels."""
+    all_rows = enrich_rows_ocp(ocp_pdfs, bdpm)
+    if biogaran_direct_pdfs:
+        all_rows.extend(enrich_rows_biogaran_direct(biogaran_direct_pdfs, bdpm))
     return all_rows
 
 
@@ -261,7 +310,7 @@ def build_sheet_detail(wb, all_rows):
         "Offre (libellé complet)", "Type de médicament", "Statut répertoire (détail)",
         "Remboursement", "Qté Cdée", "Qté fact", "PPHT Unit (€)", "CA PPHT (€)",
         "Taux Remise", "Remise HT (€)", "Groupe générique (libellé BDPM)",
-        "Fabricant (titulaire AMM)", "Rôle hybride (R/H)",
+        "Fabricant (titulaire AMM)", "Rôle hybride (R/H)", "Canal",
     ]
     ws.append(headers)
     style_header_row(ws, 1, len(headers))
@@ -273,7 +322,7 @@ def build_sheet_detail(wb, all_rows):
             r["offre"], r["type_medicament"], r["repertoire"], r["remboursement"],
             r["qte_cdee"], r["qte_fact"], r["ppht_unit"], r["ca_ppht"],
             r["taux_remise"] / 100, r["remise_ht"], r["groupe_libelle"] or "",
-            r["fabricant_titulaire"] or "", r["hybride_role"],
+            r["fabricant_titulaire"] or "", r["hybride_role"], r["canal"],
         ])
 
     n = len(all_rows) + 1
@@ -291,7 +340,7 @@ def build_sheet_detail(wb, all_rows):
 
     widths = {"A": 10, "B": 15, "C": 32, "D": 20, "E": 30, "F": 22, "G": 24,
               "H": 16, "I": 9, "J": 9, "K": 12, "L": 12, "M": 10, "N": 12,
-              "O": 35, "P": 26, "Q": 12}
+              "O": 35, "P": 26, "Q": 12, "R": 16}
     autosize(ws, widths)
     ws.freeze_panes = "A2"
     return ws, n
@@ -740,9 +789,9 @@ def build_sheet_methodologie(wb):
     return ws
 
 
-def build_report(pdf_paths, data_dir, out_path):
+def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None):
     bdpm = BDPM(data_dir)
-    all_rows = enrich_rows(pdf_paths, bdpm)
+    all_rows = enrich_rows(pdf_paths, bdpm, biogaran_direct_pdfs=biogaran_direct_pdfs)
     catalog_biogaran = compute_biogaran_catalog(all_rows)
     fuite_rows = compute_fuite(all_rows, catalog_biogaran)
     periodes = sorted({r["periode"] for r in all_rows}, key=periode_sort_key)
@@ -775,8 +824,10 @@ def build_report(pdf_paths, data_dir, out_path):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("pdfs", nargs="+", help="Un ou plusieurs BO-OFFREM PDF")
+    ap.add_argument("pdfs", nargs="+", help="Un ou plusieurs BO-OFFREM PDF (canal OCP)")
     ap.add_argument("--data", default="data", help="Dossier des fichiers BDPM")
     ap.add_argument("--out", default="rapport_pharmacie.xlsx", help="Fichier Excel de sortie")
+    ap.add_argument("--biogaran-direct", nargs="*", default=None,
+                     help="Un ou plusieurs PDF de factures Biogaran Direct (canal Biogaran Direct)")
     args = ap.parse_args()
-    build_report(args.pdfs, args.data, args.out)
+    build_report(args.pdfs, args.data, args.out, biogaran_direct_pdfs=args.biogaran_direct)
