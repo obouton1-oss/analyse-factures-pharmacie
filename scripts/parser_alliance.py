@@ -33,10 +33,34 @@ BLOC_PRODUIT_RE = re.compile(
     r"(?P<designation>.+)\n"
     r"Code Article\s*:\s*(?P<code_article>\d+)\n"
     r"(?:(?P<numero>\d+)\s+)?"
-    r"(?:Réduction de prix\s*:\s*(?P<remise_pct>[\d.,]+)\s*%\s+)?"
-    r"(?P<qte>\d+)\s+(?P<unite>\S+)\s+(?P<pu>[\d,]+)\s+(?P<tva>[\d,]+)\s*%\s+(?P<montant>[\d,]+)\n"
-    r"(?:Référence commande complémentaire\s*:\s*(?P<ref_cmd>\S*)\n)?"
-    r"Prix brut unitaire\s*:\s*(?P<prix_brut>[\d,]+)"
+    r"(?:"
+    r"Réduction de prix\s*:\s*(?P<remise_pct>[\d.,]+)\s*%\s+"
+    r"|"
+    # Variante observée sur certaines factures (ex. février 2026) : la remise
+    # ligne à ligne est libellée "Remise Simple : Montant X EUR, Taux Y %"
+    # au lieu de "Réduction de prix : Y %". On ne garde que le Taux (Y),
+    # le Montant en euros n'est pas utilisé (ca_ppht/remise_ht sont recalculés
+    # indépendamment à partir de qte x prix_brut et du montant net).
+    r"Remise Simple\s*:\s*Montant\s+[\d.,]+\s*EUR,\s*Taux\s+(?P<remise_pct2>[\d.,]+)\s*%\s+"
+    r")?"
+    # Le taux de TVA est presque toujours au format "10,00" (virgule), mais
+    # certaines factures (même variante "Remise Simple") l'impriment au
+    # format "10.00" (point) — les deux sont acceptés ; to_float() gère
+    # indifféremment virgule ou point.
+    # pu/montant : les montants élevés (ex. VYNDAQEL à 7 014,02 €) sont
+    # imprimés avec un espace comme séparateur de milliers — to_float()
+    # retire déjà les espaces, donc un simple élargissement de la classe
+    # de caractères suffit (borné à 2 décimales pour ne pas déborder sur
+    # le champ suivant).
+    r"(?P<qte>\d+)\s+(?P<unite>\S+)\s+(?P<pu>\d[\d ]*,\d{2})\s+(?P<tva>[\d.,]+)\s*%\s+(?P<montant>\d[\d ]*,\d{2})\n"
+    # Certaines factures ajoutent un suffixe après la référence (ex. code
+    # dépôt "191423 PHZ") : on capture toute la fin de ligne, pas seulement
+    # le premier mot, sinon le bloc entier ne matche plus.
+    r"(?:Référence commande complémentaire\s*:\s*(?P<ref_cmd>[^\n]*)\n)?"
+    # "Prix brut unitaire : X" sur la plupart des factures, mais certaines
+    # (même variante "Remise Simple") l'impriment "Prix brut X" (sans
+    # "unitaire" ni ":") — les deux formes sont acceptées.
+    r"Prix brut(?:\s+unitaire)?\s*:?\s*(?P<prix_brut>\d[\d ]*,\d{2})"
 )
 
 NUM_FACTURE_RE = re.compile(r"N°\s*de facture\s*:\s*(\S+)")
@@ -106,7 +130,8 @@ def extraire_facture_alliance(path_pdf):
         pu_net = to_float(m.group("pu"))
         montant_net = to_float(m.group("montant"))
         prix_brut = to_float(m.group("prix_brut"))
-        remise_pct = to_float(m.group("remise_pct")) if m.group("remise_pct") else 0.0
+        remise_pct_brut = m.group("remise_pct") or m.group("remise_pct2")
+        remise_pct = to_float(remise_pct_brut) if remise_pct_brut else 0.0
         tva = to_float(m.group("tva"))
 
         ca_ppht = round(qte * prix_brut, 2)          # CA brut (avant remise)
