@@ -17,6 +17,7 @@ import shutil
 import traceback
 import io
 import re
+import zipfile
 from contextlib import redirect_stdout, redirect_stderr
 from datetime import datetime
 from pathlib import Path
@@ -162,6 +163,33 @@ def nouvelle_analyse():
     st.session_state.error_text = None
 
 
+def expand_uploads(files):
+    """Retourne une liste de (nom_fichier, contenu_bytes) à partir des
+    fichiers déposés : les PDF sont pris tels quels, les .zip sont dépliés
+    (chaque PDF trouvé à l'intérieur est extrait, les dossiers/fichiers
+    système macOS type __MACOSX ou ._xxx sont ignorés). Permet de déposer un
+    dossier entier compressé plutôt que de sélectionner chaque PDF un par
+    un — le navigateur ne permet pas de glisser un dossier non compressé
+    directement sur la zone de dépôt."""
+    resultat = []
+    for f in files or []:
+        nom = f.name
+        if nom.lower().endswith(".zip"):
+            try:
+                with zipfile.ZipFile(io.BytesIO(f.getvalue())) as zf:
+                    for entry in zf.namelist():
+                        if not entry.lower().endswith(".pdf"):
+                            continue
+                        if entry.startswith("__MACOSX") or "/._" in entry or entry.startswith("._"):
+                            continue
+                        resultat.append((Path(entry).name, zf.read(entry)))
+            except zipfile.BadZipFile:
+                st.warning(f"⚠️ {nom} n'est pas une archive .zip valide, ignoré.")
+        else:
+            resultat.append((nom, f.getvalue()))
+    return resultat
+
+
 # ---------------------------------------------------------------------------
 # Zones de dépôt (3 canaux)
 # ---------------------------------------------------------------------------
@@ -170,41 +198,46 @@ col1, col2, col3 = st.columns(3)
 with col1:
     st.markdown('<div class="canal-card" style="--accent:#2E86C1">', unsafe_allow_html=True)
     st.markdown("### 📋 OCP")
-    st.markdown('<div class="sub">Récapitulatifs mensuels BO-OFFREM</div>', unsafe_allow_html=True)
-    ocp_files = st.file_uploader(
-        "PDF OCP", type="pdf", accept_multiple_files=True,
+    st.markdown('<div class="sub">Récapitulatifs mensuels BO-OFFREM — PDF individuels ou dossier zippé</div>', unsafe_allow_html=True)
+    ocp_raw = st.file_uploader(
+        "PDF OCP", type=["pdf", "zip"], accept_multiple_files=True,
         key=f"ocp_{k}", label_visibility="collapsed",
     )
-    st.caption(f"{len(ocp_files)} fichier(s) déposé(s)" if ocp_files else "Aucun fichier pour l'instant")
+    ocp_files = expand_uploads(ocp_raw)
+    st.caption(f"{len(ocp_files)} PDF détecté(s)" if ocp_files else "Aucun fichier pour l'instant")
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col2:
     st.markdown('<div class="canal-card" style="--accent:#28B463">', unsafe_allow_html=True)
     st.markdown("### 🏥 Alliance Healthcare")
-    st.markdown('<div class="sub">Factures grossiste (les relevés mensuels sont ignorés automatiquement)</div>', unsafe_allow_html=True)
-    alliance_files = st.file_uploader(
-        "PDF Alliance", type="pdf", accept_multiple_files=True,
+    st.markdown('<div class="sub">Factures grossiste (relevés mensuels ignorés automatiquement) — PDF individuels ou dossier zippé</div>', unsafe_allow_html=True)
+    alliance_raw = st.file_uploader(
+        "PDF Alliance", type=["pdf", "zip"], accept_multiple_files=True,
         key=f"alliance_{k}", label_visibility="collapsed",
     )
-    st.caption(f"{len(alliance_files)} fichier(s) déposé(s)" if alliance_files else "Aucun fichier pour l'instant")
+    alliance_files = expand_uploads(alliance_raw)
+    st.caption(f"{len(alliance_files)} PDF détecté(s)" if alliance_files else "Aucun fichier pour l'instant")
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col3:
     st.markdown('<div class="canal-card" style="--accent:#E67E22">', unsafe_allow_html=True)
     st.markdown("### 💊 Biogaran Direct")
-    st.markdown('<div class="sub">Factures (facture_*.pdf) + avoirs RDP (avoir_*.pdf) — triés automatiquement</div>', unsafe_allow_html=True)
-    biogaran_files = st.file_uploader(
-        "PDF Biogaran", type="pdf", accept_multiple_files=True,
+    st.markdown('<div class="sub">Factures (facture_*.pdf) + avoirs RDP (avoir_*.pdf) — triés automatiquement, PDF individuels ou dossier zippé</div>', unsafe_allow_html=True)
+    biogaran_raw = st.file_uploader(
+        "PDF Biogaran", type=["pdf", "zip"], accept_multiple_files=True,
         key=f"biogaran_{k}", label_visibility="collapsed",
     )
-    n_fact = sum(1 for f in (biogaran_files or []) if f.name.lower().startswith("facture_"))
-    n_avoir = sum(1 for f in (biogaran_files or []) if f.name.lower().startswith("avoir_"))
-    n_autre = len(biogaran_files or []) - n_fact - n_avoir
+    biogaran_files = expand_uploads(biogaran_raw)
+    n_fact = sum(1 for nom, _ in biogaran_files if nom.lower().startswith("facture_"))
+    n_avoir = sum(1 for nom, _ in biogaran_files if nom.lower().startswith("avoir_"))
+    n_autre = len(biogaran_files) - n_fact - n_avoir
     if biogaran_files:
         st.caption(f"{n_fact} facture(s), {n_avoir} avoir(s)" + (f", {n_autre} fichier(s) non reconnu(s) ⚠️" if n_autre else ""))
     else:
         st.caption("Aucun fichier pour l'instant")
     st.markdown('</div>', unsafe_allow_html=True)
+
+st.caption("💡 Astuce : pour déposer un dossier entier d'un coup, compresse-le en .zip sur ton Mac (clic droit → Compresser) puis glisse le .zip — les PDF à l'intérieur seront détectés automatiquement.")
 
 st.write("")
 bcol1, bcol2, _ = st.columns([1, 1, 3])
@@ -213,7 +246,7 @@ if bcol2.button("🔄 Nouvelle analyse", use_container_width=True):
     nouvelle_analyse()
     st.rerun()
 
-total_fichiers = len(ocp_files or []) + len(alliance_files or []) + len(biogaran_files or [])
+total_fichiers = len(ocp_files) + len(alliance_files) + len(biogaran_files)
 
 
 # ---------------------------------------------------------------------------
@@ -249,17 +282,17 @@ if generer:
                     dossier = tmp_dir / sous_dossier
                     dossier.mkdir(parents=True, exist_ok=True)
                     chemins = []
-                    for f in files or []:
-                        chemin = dossier / f.name
-                        chemin.write_bytes(f.getvalue())
+                    for nom, contenu in files or []:
+                        chemin = dossier / nom
+                        chemin.write_bytes(contenu)
                         chemins.append(str(chemin))
                     return chemins
 
                 ocp_paths = sauver(ocp_files, "ocp")
                 alliance_paths = sauver(alliance_files, "alliance")
 
-                facture_files = [f for f in (biogaran_files or []) if f.name.lower().startswith("facture_")]
-                avoir_files = [f for f in (biogaran_files or []) if f.name.lower().startswith("avoir_")]
+                facture_files = [(nom, c) for nom, c in biogaran_files if nom.lower().startswith("facture_")]
+                avoir_files = [(nom, c) for nom, c in biogaran_files if nom.lower().startswith("avoir_")]
                 biogaran_paths = sauver(facture_files, "biogaran_direct")
                 avoir_paths = sauver(avoir_files, "biogaran_avoirs")
 
