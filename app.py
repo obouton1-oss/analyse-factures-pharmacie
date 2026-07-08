@@ -83,6 +83,49 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
+# ---------------------------------------------------------------------------
+# Protection par mot de passe
+# ---------------------------------------------------------------------------
+def verifier_mot_de_passe():
+    """Affiche un écran de connexion tant que le bon mot de passe n'a pas été
+    saisi. Le mot de passe attendu est lu dans st.secrets (fichier
+    .streamlit/secrets.toml en local, section "Secrets" des réglages de
+    l'app sur Streamlit Cloud) — jamais écrit en clair dans le code."""
+    if st.session_state.get("authenticated"):
+        return True
+
+    mot_de_passe_attendu = st.secrets.get("password")
+
+    st.markdown("""
+    <div class="app-header">
+        <h1>💊 Analyses factures génériques</h1>
+        <p>Accès protégé par mot de passe.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if not mot_de_passe_attendu:
+        st.error(
+            "Aucun mot de passe configuré. Ajoute-le dans .streamlit/secrets.toml "
+            "(en local) ou dans les réglages « Secrets » de l'app sur Streamlit Cloud, "
+            'sous la forme : password = "..."'
+        )
+        st.stop()
+
+    _, col_centre, _ = st.columns([1, 1, 1])
+    with col_centre:
+        saisie = st.text_input("Mot de passe", type="password", key="pwd_input")
+        if st.button("Se connecter", type="primary", use_container_width=True):
+            if saisie == mot_de_passe_attendu:
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Mot de passe incorrect.")
+    st.stop()
+
+
+verifier_mot_de_passe()
+
+
 st.markdown(f"""
 <div class="app-header">
     <h1>💊 Analyses factures génériques</h1>
