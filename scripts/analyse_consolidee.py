@@ -23,6 +23,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from parser_bo_offrem import parse_bo_offrem
 from bdpm import BDPM
+from parser_avoir_rdp_biogaran import extraire_avoir_rdp
 
 # ---------------------------------------------------------------------------
 # Classification des offres BO-OFFREM -> génériqueur / catégorie
@@ -250,6 +251,25 @@ def enrich_rows_alliance(pdf_paths, bdpm):
             brand, is_gen = _resoudre_marque_alliance(r, bdpm)
             all_rows.append(_enrichir_ligne(r, periode, "Alliance", bdpm, brand, is_gen))
     return all_rows
+
+
+def charger_avoirs_rdp(avoir_pdfs):
+    """Charge les avoirs de Remise de Performance (RDP) Biogaran : retourne la
+    liste consolidée des blocs RDP (tous documents confondus), chaque bloc
+    portant déjà son document/date/période d'origine (voir
+    parser_avoir_rdp_biogaran.extraire_avoir_rdp)."""
+    toutes_lignes = []
+    for pdf_path in avoir_pdfs:
+        avoir = extraire_avoir_rdp(pdf_path)
+        if not avoir["lignes"]:
+            print(f"⚠️  Aucun bloc RDP trouvé dans {pdf_path}", file=sys.stderr)
+            continue
+        somme = round(sum(l["montant_remise_ht"] for l in avoir["lignes"]), 2)
+        if avoir["total"] is not None and abs(somme - avoir["total"]) > 0.01:
+            print(f"⚠️  {pdf_path} : somme des blocs ({somme} €) ≠ TOTAL imprimé ({avoir['total']} €)",
+                  file=sys.stderr)
+        toutes_lignes.extend(avoir["lignes"])
+    return toutes_lignes
 
 
 def enrich_rows(ocp_pdfs, bdpm, biogaran_direct_pdfs=None, alliance_pdfs=None):
@@ -698,6 +718,95 @@ def build_sheet_fuite(wb, all_rows, catalog_biogaran):
     return ws, n_fuite
 
 
+# Tolérance du contrôle RDP : au-delà de ce seuil (en valeur absolue ou en %
+# du CA brut de référence, le plus grand des deux), l'écart est signalé
+# "À VÉRIFIER" plutôt que "OK". Seuil de départ, à resserrer une fois le
+# contrôle éprouvé sur plusieurs mois.
+SEUIL_ECART_RDP_EUR = 5.0
+SEUIL_ECART_RDP_PCT = 0.03
+TOLERANCE_TAUX_REMISE = 0.5  # points de %, pour apparier taux_remise facture ~ 40 - taux_rdp
+
+
+def build_sheet_controle_rdp(wb, all_rows, avoir_lignes):
+    """Pour chaque bloc RDP (taux x circuit x période) d'un avoir Biogaran,
+    reconstitue le CA brut correspondant à partir du pipeline (génériqueur
+    BIOGARAN, période et canaux du bon circuit, taux de remise facture
+    attendu = 40 - taux RDP) et le compare au « CA brut de référence »
+    imprimé sur l'avoir."""
+    ws = wb.create_sheet("Contrôle RDP Biogaran")
+    ws["A1"] = "Contrôle RDP Biogaran — CA brut de référence (avoir) vs CA calculé (pipeline)"
+    ws["A1"].font = TITLE_FONT
+    ws["A2"] = ("Un écart peut venir d'une facture manquante sur un canal, d'une période de "
+                "référence décalée par rapport aux dates de facture, ou d'une remise non conforme "
+                "à 40 - taux RDP. Voir onglet Méthodologie.")
+    ws["A2"].font = SUBTITLE_FONT
+
+    headers = [
+        "N° Document", "Date document", "Période de référence", "Circuit",
+        "Canaux concernés", "Taux RDP (%)", "Taux remise facture attendu (%)",
+        "CA brut de référence — avoir (€)", "CA PPHT calculé — pipeline (€)",
+        "Nb lignes pipeline matchées", "Écart (€)", "Écart (%)", "Statut",
+    ]
+    start_row = 4
+    for i, h in enumerate(headers, start=1):
+        ws.cell(row=start_row, column=i, value=h)
+    style_header_row(ws, start_row, len(headers))
+
+    row = start_row + 1
+    for ligne in avoir_lignes:
+        taux_attendu = ligne["taux_remise_facture_attendu"]
+        matches = [
+            r for r in all_rows
+            if r["genericqueur"] == "BIOGARAN"
+            and r["periode"] == ligne["periode"]
+            and r["canal"] in ligne["canaux"]
+            and taux_attendu is not None
+            and r["taux_remise"] is not None
+            and abs(r["taux_remise"] - taux_attendu) <= TOLERANCE_TAUX_REMISE
+        ]
+        ca_calcule = round(sum(r["ca_ppht"] for r in matches), 2)
+        ca_reference = ligne["ca_brut_reference"] or 0.0
+        ecart = round(ca_calcule - ca_reference, 2)
+        ecart_pct = (ecart / ca_reference) if ca_reference else None
+        seuil = max(SEUIL_ECART_RDP_EUR, SEUIL_ECART_RDP_PCT * ca_reference)
+        statut = "OK" if abs(ecart) <= seuil else "À VÉRIFIER"
+
+        values = [
+            ligne["num_document"], ligne["date_document"], ligne["periode"], ligne["circuit"],
+            " + ".join(ligne["canaux"]), ligne["taux_rdp"], taux_attendu,
+            ca_reference, ca_calcule, len(matches), ecart, ecart_pct, statut,
+        ]
+        for i, v in enumerate(values, start=1):
+            ws.cell(row=row, column=i, value=v)
+        ws.cell(row=row, column=6).number_format = '0.0"%"'
+        ws.cell(row=row, column=7).number_format = '0.0"%"'
+        ws.cell(row=row, column=8).number_format = EUR_FMT
+        ws.cell(row=row, column=9).number_format = EUR_FMT
+        ws.cell(row=row, column=11).number_format = EUR_FMT
+        if ecart_pct is not None:
+            ws.cell(row=row, column=12).number_format = PCT_FMT
+        for c in range(1, len(headers) + 1):
+            ws.cell(row=row, column=c).font = NORMAL_FONT
+            if statut == "À VÉRIFIER":
+                ws.cell(row=row, column=c).fill = PatternFill("solid", start_color=RED_LIGHT, end_color=RED_LIGHT)
+        row += 1
+
+    last_row = row - 1
+    n_lignes = max(0, last_row - start_row)
+    if n_lignes > 0:
+        tab = Table(displayName="ControleRDPBiogaran", ref=f"A{start_row}:{get_column_letter(len(headers))}{last_row}")
+        tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium11", showRowStripes=True)
+        ws.add_table(tab)
+    else:
+        ws.cell(row=start_row + 1, column=1, value="Aucun avoir RDP fourni (--avoirs-rdp).")
+
+    widths = {"A": 14, "B": 14, "C": 16, "D": 12, "E": 20, "F": 12, "G": 16,
+              "H": 20, "I": 20, "J": 14, "K": 12, "L": 10, "M": 13}
+    autosize(ws, widths)
+    ws.freeze_panes = f"A{start_row+1}"
+    return ws, n_lignes
+
+
 def build_sheet_resume(wb, all_rows, n_fuite):
     ws = wb.create_sheet("Résumé", 0)
     ws["A1"] = "Analyse Factures Pharmacie — Récapitulatif"
@@ -834,12 +943,14 @@ def build_sheet_methodologie(wb):
     return ws
 
 
-def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, alliance_pdfs=None):
+def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, alliance_pdfs=None,
+                  avoirs_rdp_pdfs=None):
     bdpm = BDPM(data_dir)
     all_rows = enrich_rows(pdf_paths, bdpm, biogaran_direct_pdfs=biogaran_direct_pdfs, alliance_pdfs=alliance_pdfs)
     catalog_biogaran = compute_biogaran_catalog(all_rows)
     fuite_rows = compute_fuite(all_rows, catalog_biogaran)
     periodes = sorted({r["periode"] for r in all_rows}, key=periode_sort_key)
+    avoir_lignes = charger_avoirs_rdp(avoirs_rdp_pdfs) if avoirs_rdp_pdfs else []
 
     wb = Workbook()
     wb.remove(wb.active)
@@ -854,6 +965,8 @@ def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, allia
     build_sheet_genericqueur(wb, n_detail, labo_fills, genericqueurs)
     build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills)
     _, n_fuite = build_sheet_fuite(wb, all_rows, catalog_biogaran)
+    if avoir_lignes:
+        build_sheet_controle_rdp(wb, all_rows, avoir_lignes)
     build_sheet_resume(wb, all_rows, n_fuite)
     build_sheet_methodologie(wb)
 
@@ -869,6 +982,9 @@ def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, allia
         for o in a_classifier:
             print("   ", o, file=sys.stderr)
 
+    if avoir_lignes:
+        print(f"  {len(avoir_lignes)} bloc(s) RDP Biogaran contrôlés (onglet 'Contrôle RDP Biogaran')")
+
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
@@ -879,6 +995,9 @@ if __name__ == "__main__":
                      help="Un ou plusieurs PDF de factures Biogaran Direct (canal Biogaran Direct)")
     ap.add_argument("--alliance", nargs="*", default=None,
                      help="Un ou plusieurs PDF de factures Alliance Healthcare (canal Alliance)")
+    ap.add_argument("--avoirs-rdp", nargs="*", default=None,
+                     help="Un ou plusieurs PDF d'avoirs RDP Biogaran (avoir_*.pdf) pour le contrôle croisé")
     args = ap.parse_args()
     build_report(args.pdfs, args.data, args.out,
-                  biogaran_direct_pdfs=args.biogaran_direct, alliance_pdfs=args.alliance)
+                  biogaran_direct_pdfs=args.biogaran_direct, alliance_pdfs=args.alliance,
+                  avoirs_rdp_pdfs=args.avoirs_rdp)

@@ -1,0 +1,3 @@
+pdfplumber
+openpyxl
+streamlit
