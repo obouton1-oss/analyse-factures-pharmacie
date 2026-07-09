@@ -87,8 +87,13 @@ st.markdown(f"""
        longue et repousser le bouton "Browse files" hors de vue, obligeant à
        dérouler toute la zone pour en ajouter d'autres. Le nombre de fichiers
        détectés est de toute façon déjà affiché juste en dessous (st.caption),
-       donc cette liste native est redondante. */
-    div[data-testid="stFileUploaderFile"] {{
+       donc cette liste native est redondante.
+       Deux sélecteurs sont ciblés car Streamlit a changé l'implémentation de
+       cette liste (ancien composant "stFileUploaderFile" -> nouveau système
+       de "chips" "stFileChips") ; on couvre les deux pour rester robuste aux
+       mises à jour de version. */
+    div[data-testid="stFileUploaderFile"],
+    div[data-testid="stFileChips"] {{
         display: none !important;
     }}
 </style>
