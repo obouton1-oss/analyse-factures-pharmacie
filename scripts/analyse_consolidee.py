@@ -220,17 +220,49 @@ def enrich_rows_biogaran_direct(pdf_paths, bdpm):
     return all_rows
 
 
+# Certaines lignes Alliance n'ont aucun mot-clé de marque dans leur
+# désignation (ex. "BISOPROLOL REF CPR 1,25MG 30" pour un Biogaran vendu sans
+# suffixe de marque sur cette référence) : parser_alliance.py ne peut alors
+# rien détecter dans le texte. Le titulaire officiel BDPM (bdpm.fabricant())
+# permet de trancher ces cas avec certitude quand il correspond à un
+# génériqueur déjà suivi ailleurs dans le pipeline (OCP, Biogaran Direct) —
+# construit à partir des titulaires réels observés sur les lignes "Générique
+# (labo non identifié)" du rapport du 09/07/2026 (102 lignes, remontées par
+# le pharmacien qui a identifié plusieurs cas Biogaran mal classés qui
+# gonflaient à tort l'onglet "Fuite Biogaran"). ⚠️ Le titulaire de l'AMM
+# n'est pas toujours strictement le fournisseur commercial (cf. bdpm.py) —
+# ne mapper que les libellés confirmés sur des cas réels, pas de règle
+# générique automatique (risque de mal classer un cas de co-exploitation).
+TITULAIRE_BDPM_TO_GENERIQUEUR = {
+    "BIOGARAN": "BIOGARAN",
+    "CRISTERS": "CRISTERS",
+    "EG LABO - LABORATOIRES EUROGENERICS": "EG LABO",
+    "SUN PHARMA FRANCE": "SUN PHARMA",
+    "SUN PHARMACEUTICAL INDUSTRIES EUROPE (PAYS BAS)": "SUN PHARMA",
+    "VIATRIS": "VIATRIS",
+    "EXELTIS SANTE": "EXELTIS",
+    "TEVA": "TEVA",
+    "TEVA (PAYS-BAS)": "TEVA",
+    "ARROW GENERIQUES": "ARROW",
+    "SUBSTIPHARM": "SUBSTIPHARM",
+}
+
+
 def _resoudre_marque_alliance(r, bdpm):
-    """Résout la marque génériqueur d'une ligne Alliance.
-    Priorité au mot-clé de désignation déjà détecté par parser_alliance.py
-    (reflète la marque réellement imprimée sur le produit — fiable). À
-    défaut, filet de sécurité BDPM : si le CIP13 est officiellement au
-    répertoire générique (source ANSM, indépendante de la marque), on le
-    signale comme "Générique (labo non identifié)" plutôt que de le perdre
-    silencieusement parmi les princeps/dispositifs — ça évite de sous-
-    estimer la fuite et donne une liste concrète pour enrichir les mots-clés."""
+    """Résout la marque génériqueur d'une ligne Alliance, par ordre de priorité :
+    1. Mot-clé de désignation déjà détecté par parser_alliance.py (reflète la
+       marque réellement imprimée sur le produit — la source la plus fiable).
+    2. Titulaire officiel BDPM (bdpm.fabricant()), s'il correspond à un
+       génériqueur connu (TITULAIRE_BDPM_TO_GENERIQUEUR ci-dessus).
+    3. Filet de sécurité final : si le CIP13 est officiellement au répertoire
+       générique (source ANSM, indépendante de la marque) sans titulaire
+       reconnu, on le signale comme "Générique (labo non identifié)" plutôt
+       que de le perdre silencieusement parmi les princeps/dispositifs."""
     if r["offre"]:
         return r["offre"], True
+    marque_bdpm = TITULAIRE_BDPM_TO_GENERIQUEUR.get(bdpm.fabricant(r["cip13"]))
+    if marque_bdpm:
+        return marque_bdpm, True
     nat = bdpm.nature(r["cip13"])
     if nat["repertoire"] == "Générique (répertoire)":
         return "Générique (labo non identifié)", True
