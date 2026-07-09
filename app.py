@@ -82,18 +82,32 @@ st.markdown(f"""
     div[data-testid="stFileUploader"] section {{
         border-radius: 8px;
     }}
-    /* On masque la liste des fichiers déjà déposés : avec beaucoup de PDF
-       (factures Alliance en particulier), cette liste peut devenir très
-       longue et repousser le bouton "Browse files" hors de vue, obligeant à
-       dérouler toute la zone pour en ajouter d'autres. Le nombre de fichiers
-       détectés est de toute façon déjà affiché juste en dessous (st.caption),
-       donc cette liste native est redondante.
-       Deux sélecteurs sont ciblés car Streamlit a changé l'implémentation de
-       cette liste (ancien composant "stFileUploaderFile" -> nouveau système
-       de "chips" "stFileChips") ; on couvre les deux pour rester robuste aux
-       mises à jour de version. */
-    div[data-testid="stFileUploaderFile"],
+    /* On garde la liste des fichiers déposés visible (chaque fichier a sa
+       propre croix pour le retirer en cas d'erreur), mais on la limite en
+       hauteur avec défilement interne, et surtout on fait remonter le
+       bouton "+" (ajouter des fichiers) tout en haut de cette zone au lieu
+       de le laisser tout en bas après le dernier fichier : avec beaucoup de
+       PDF (factures Alliance en particulier), il finissait repoussé hors de
+       vue, obligeant à dérouler toute la liste pour le retrouver.
+       Le sélecteur "stFileUploaderFile" est gardé en compatibilité avec les
+       anciennes versions de Streamlit (avant le passage au système de
+       "chips" "stFileChips"). */
     div[data-testid="stFileChips"] {{
+        max-height: 170px;
+        overflow-y: auto;
+        align-content: flex-start;
+        padding-right: 4px;
+    }}
+    div[data-testid="stFileChips"] > button[aria-label="Add files"] {{
+        order: -1;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: #FAFBFC;
+        border-radius: 50%;
+        box-shadow: 0 0 0 3px #FAFBFC;
+    }}
+    div[data-testid="stFileUploaderFile"] {{
         display: none !important;
     }}
 </style>
