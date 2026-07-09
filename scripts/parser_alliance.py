@@ -162,7 +162,12 @@ def extraire_facture_alliance(path_pdf):
 
 
 def extraire_dossier(dossier_pdfs):
+    """Parcourt tous les PDF d'un dossier et retourne la liste consolidée des
+    lignes. Déduplique par n° de facture : si la même facture apparaît deux
+    fois (fichier déposé deux fois sous des noms différents, PDF présent à la
+    fois seul et dans un dossier zippé...), elle n'est comptée qu'une fois."""
     toutes_lignes = []
+    factures_vues = {}  # num_facture -> nom du fichier déjà retenu
     for nom in sorted(os.listdir(dossier_pdfs)):
         if not nom.lower().endswith(".pdf"):
             continue
@@ -170,6 +175,14 @@ def extraire_dossier(dossier_pdfs):
         facture = extraire_facture_alliance(chemin)
         if not facture["lignes"]:
             print(f"⚠️  Aucune ligne produit trouvée dans {nom}")
+            continue
+        num_facture = facture["num_facture"]
+        if num_facture and num_facture in factures_vues:
+            print(f"⚠️  Facture {num_facture} ({nom}) déjà comptabilisée via "
+                  f"{factures_vues[num_facture]} — doublon ignoré")
+            continue
+        if num_facture:
+            factures_vues[num_facture] = nom
         toutes_lignes.extend(facture["lignes"])
     return toutes_lignes
 

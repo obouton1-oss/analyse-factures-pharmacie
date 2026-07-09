@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Interface Streamlit pour l'analyse des factures pharmacie (canaux OCP,
-Alliance Healthcare, Biogaran Direct + avoirs RDP).
+Alliance Healthcare, Biogaran Direct).
 
 Lancement :
     cd ~/projets_pharmacie/analyse-factures-pharmacie
@@ -18,6 +18,7 @@ import traceback
 import io
 import re
 import zipfile
+import hashlib
 from contextlib import redirect_stdout, redirect_stderr
 from datetime import datetime
 from pathlib import Path
@@ -80,6 +81,15 @@ st.markdown(f"""
 
     div[data-testid="stFileUploader"] section {{
         border-radius: 8px;
+    }}
+    /* On masque la liste des fichiers déjà déposés : avec beaucoup de PDF
+       (factures Alliance en particulier), cette liste peut devenir très
+       longue et repousser le bouton "Browse files" hors de vue, obligeant à
+       dérouler toute la zone pour en ajouter d'autres. Le nombre de fichiers
+       détectés est de toute façon déjà affiché juste en dessous (st.caption),
+       donc cette liste native est redondante. */
+    div[data-testid="stFileUploaderFile"] {{
+        display: none !important;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -170,8 +180,24 @@ def expand_uploads(files):
     système macOS type __MACOSX ou ._xxx sont ignorés). Permet de déposer un
     dossier entier compressé plutôt que de sélectionner chaque PDF un par
     un — le navigateur ne permet pas de glisser un dossier non compressé
-    directement sur la zone de dépôt."""
+    directement sur la zone de dépôt.
+
+    Déduplique aussi au passage par empreinte du contenu (sha256) : si le
+    même PDF est déposé deux fois (dépôt en plusieurs fois, PDF présent à la
+    fois seul et dans un .zip...), il n'est gardé qu'une fois."""
     resultat = []
+    vus = set()
+    doublons = 0
+
+    def ajouter(nom, contenu):
+        nonlocal doublons
+        empreinte = hashlib.sha256(contenu).hexdigest()
+        if empreinte in vus:
+            doublons += 1
+            return
+        vus.add(empreinte)
+        resultat.append((nom, contenu))
+
     for f in files or []:
         nom = f.name
         if nom.lower().endswith(".zip"):
@@ -182,11 +208,14 @@ def expand_uploads(files):
                             continue
                         if entry.startswith("__MACOSX") or "/._" in entry or entry.startswith("._"):
                             continue
-                        resultat.append((Path(entry).name, zf.read(entry)))
+                        ajouter(Path(entry).name, zf.read(entry))
             except zipfile.BadZipFile:
                 st.warning(f"⚠️ {nom} n'est pas une archive .zip valide, ignoré.")
         else:
-            resultat.append((nom, f.getvalue()))
+            ajouter(nom, f.getvalue())
+
+    if doublons:
+        st.caption(f"🔁 {doublons} doublon(s) détecté(s) et ignoré(s) (fichier identique déjà déposé).")
     return resultat
 
 
@@ -199,11 +228,10 @@ with col1:
     st.markdown('<div class="canal-card" style="--accent:#2E86C1">', unsafe_allow_html=True)
     st.markdown("### 📋 OCP")
     st.markdown('<div class="sub">Récapitulatifs mensuels BO-OFFREM — PDF individuels ou dossier zippé</div>', unsafe_allow_html=True)
-    with st.container(height=180, border=False):
-        ocp_raw = st.file_uploader(
-            "PDF OCP", type=["pdf", "zip"], accept_multiple_files=True,
-            key=f"ocp_{k}", label_visibility="collapsed",
-        )
+    ocp_raw = st.file_uploader(
+        "PDF OCP", type=["pdf", "zip"], accept_multiple_files=True,
+        key=f"ocp_{k}", label_visibility="collapsed",
+    )
     ocp_files = expand_uploads(ocp_raw)
     st.caption(f"{len(ocp_files)} PDF détecté(s)" if ocp_files else "Aucun fichier pour l'instant")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -212,11 +240,10 @@ with col2:
     st.markdown('<div class="canal-card" style="--accent:#28B463">', unsafe_allow_html=True)
     st.markdown("### 🏥 Alliance Healthcare")
     st.markdown('<div class="sub">Factures grossiste (relevés mensuels ignorés automatiquement) — PDF individuels ou dossier zippé</div>', unsafe_allow_html=True)
-    with st.container(height=180, border=False):
-        alliance_raw = st.file_uploader(
-            "PDF Alliance", type=["pdf", "zip"], accept_multiple_files=True,
-            key=f"alliance_{k}", label_visibility="collapsed",
-        )
+    alliance_raw = st.file_uploader(
+        "PDF Alliance", type=["pdf", "zip"], accept_multiple_files=True,
+        key=f"alliance_{k}", label_visibility="collapsed",
+    )
     alliance_files = expand_uploads(alliance_raw)
     st.caption(f"{len(alliance_files)} PDF détecté(s)" if alliance_files else "Aucun fichier pour l'instant")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -224,18 +251,18 @@ with col2:
 with col3:
     st.markdown('<div class="canal-card" style="--accent:#E67E22">', unsafe_allow_html=True)
     st.markdown("### 💊 Biogaran Direct")
-    st.markdown('<div class="sub">Factures (facture_*.pdf) + avoirs RDP (avoir_*.pdf) — triés automatiquement, PDF individuels ou dossier zippé</div>', unsafe_allow_html=True)
-    with st.container(height=180, border=False):
-        biogaran_raw = st.file_uploader(
-            "PDF Biogaran", type=["pdf", "zip"], accept_multiple_files=True,
-            key=f"biogaran_{k}", label_visibility="collapsed",
-        )
-    biogaran_files = expand_uploads(biogaran_raw)
-    n_fact = sum(1 for nom, _ in biogaran_files if nom.lower().startswith("facture_"))
-    n_avoir = sum(1 for nom, _ in biogaran_files if nom.lower().startswith("avoir_"))
-    n_autre = len(biogaran_files) - n_fact - n_avoir
+    st.markdown('<div class="sub">Factures (facture_*.pdf) — PDF individuels ou dossier zippé. Les avoirs (avoir_*.pdf) sont ignorés s\'ils sont déposés.</div>', unsafe_allow_html=True)
+    biogaran_raw = st.file_uploader(
+        "PDF Biogaran", type=["pdf", "zip"], accept_multiple_files=True,
+        key=f"biogaran_{k}", label_visibility="collapsed",
+    )
+    biogaran_files_brutes = expand_uploads(biogaran_raw)
+    biogaran_files = [(nom, c) for nom, c in biogaran_files_brutes if not nom.lower().startswith("avoir_")]
+    n_avoir_ignores = len(biogaran_files_brutes) - len(biogaran_files)
     if biogaran_files:
-        st.caption(f"{n_fact} facture(s), {n_avoir} avoir(s)" + (f", {n_autre} fichier(s) non reconnu(s) ⚠️" if n_autre else ""))
+        st.caption(f"{len(biogaran_files)} facture(s) détectée(s)" + (f" — {n_avoir_ignores} avoir(s) ignoré(s)" if n_avoir_ignores else ""))
+    elif n_avoir_ignores:
+        st.caption(f"{n_avoir_ignores} avoir(s) déposé(s), ignoré(s) (non pris en compte)")
     else:
         st.caption("Aucun fichier pour l'instant")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -268,9 +295,6 @@ def parse_kpis(log_text):
     if m:
         kpis["periodes"] = m.group(1).strip()
     kpis["n_warnings"] = log_text.count("⚠️")
-    m = re.search(r"(\d+) bloc\(s\) RDP Biogaran", log_text)
-    if m:
-        kpis["rdp"] = m.group(1)
     return kpis
 
 
@@ -293,11 +317,7 @@ if generer:
 
                 ocp_paths = sauver(ocp_files, "ocp")
                 alliance_paths = sauver(alliance_files, "alliance")
-
-                facture_files = [(nom, c) for nom, c in biogaran_files if nom.lower().startswith("facture_")]
-                avoir_files = [(nom, c) for nom, c in biogaran_files if nom.lower().startswith("avoir_")]
-                biogaran_paths = sauver(facture_files, "biogaran_direct")
-                avoir_paths = sauver(avoir_files, "biogaran_avoirs")
+                biogaran_paths = sauver(biogaran_files, "biogaran_direct")
 
                 out_path = tmp_dir / "rapport_pharmacie.xlsx"
                 data_dir = str(ROOT / "data")
@@ -308,7 +328,6 @@ if generer:
                         ocp_paths, data_dir, str(out_path),
                         biogaran_direct_pdfs=biogaran_paths or None,
                         alliance_pdfs=alliance_paths or None,
-                        avoirs_rdp_pdfs=avoir_paths or None,
                     )
 
                 log_text = log_buffer.getvalue()
@@ -337,12 +356,11 @@ if st.session_state.report_bytes:
     st.success("Rapport généré avec succès ✅")
 
     kpis = st.session_state.kpis or {}
-    kcols = st.columns(5)
+    kcols = st.columns(4)
     kpi_defs = [
         ("lignes", "Lignes produit"),
         ("ca_total", "CA PPHT total"),
         ("fuite", "Lignes de fuite"),
-        ("rdp", "Blocs RDP contrôlés"),
         ("n_warnings", "Avertissements"),
     ]
     for col, (key, label) in zip(kcols, kpi_defs):
