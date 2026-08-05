@@ -48,7 +48,7 @@
 59	65832913	H	BRINZOLAMIDE/TIMOLOL BIOGARAN 10 mg/mL + 5 mg/mL, collyre en suspension	           
 59	61083683	H	BRINZOLAMIDE/TIMOLOL ZENTIVA 10 mg/5 mg par mL, collyre en suspension	           
 82	61091445	H	CABESOL 500 microgrammes/g, shampooing	           
-78	60120260	H	CHLORHEXIDINE LIBERTY PHARMA 0,20 %, solution pour bain de bouche	           
+78	60120260	H	CHLORHEXIDINE ARROW 0,20 %, solution pour bain de bouche	           
 64	66194520	H	CHLORHEXIDINE/BENZALKONIUM/ALCOOL BENZYLIQUE EG LABO CONSEIL, solution pour application cutanée	           
 65	63273126	H	CICLOPIROX OLAMINE ARROW 1%, crème	           
 66	64330943	H	CICLOPIROX OLAMINE ARROW 1,5 %, shampooing	           
@@ -73,6 +73,7 @@
 80	64950392	R	EPIDUO 0,3 %/2,5 %, gel	           
 43	62933355	R	FLIXOTIDE 125 microgrammes/dose, suspension pour inhalation en flacon pressurisé	           
 44	66545581	R	FLIXOTIDE 250 microgrammes/dose, suspension pour inhalation en flacon pressurisé	           
+84	64103073	H	FLUTICASONE FUROATE SUBSTIPHARM 27,5 microgrammes/pulvérisation, suspension pour pulvérisation nasale	           
 84	66160831	H	FLUTICASONE FUROATE TEVA 27,5 microgrammes/pulvérisation, suspension pour pulvérisation nasale	           
 58	66489175	R	GANFORT 0,3 mg/ml + 5 mg/ml, collyre en solution	           
 57	60892664	R	GANFORT 0,3 mg/ml + 5 mg/ml, collyre en solution en récipient unidose	           
@@ -137,7 +138,9 @@
 22	61893609	H	TIOTROPIUM BIOGARAN EOLIP 18 microgrammes, poudre pour inhalation en gélule	           
 22	61922808	H	TIOTROPIUM EG VERTICAL-HALER 18 microgrammes, poudre pour inhalation en gélule	           
 22	63653114	H	TIOTROPIUM VIATRIS 18 microgrammes, poudre pour inhalation en gélule	           
+84	68922287	H	TISONA 27,5 microgrammes/pulvérisation, suspension pour pulvérisation nasale	           
 87	65206304	H	TIXOCORTOL H4 PHARMA 1%, suspension nasale	           
+87	60088510	H	TIXOCORTOL LIBERTY PHARMA 1%, suspension nasale	           
 85	68808419	H	TRIAMCINOLONE ACETONIDE SUBSTIPHARM 55 microgrammes/dose, suspension pour pulvérisation nasale	           
 64	63728524	H	VALCADINO, solution pour application cutanée	           
 70	69600677	H	VERCOLVERTINE, solution pour application locale	           
