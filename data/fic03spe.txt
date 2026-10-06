@@ -9,9 +9,13 @@
 59	65711858	R	AZARGA 10 mg/mL + 5 mg/mL, collyre en suspension	           
 81	60418221	H	AZELASTINE CHLORHYDRATE / FLUTICASONE PROPIONATE BIOGARAN 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
 81	65857172	H	AZELASTINE CHLORHYDRATE / FLUTICASONE PROPIONATE LA COLINA 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
+81	68250971	H	AZELASTINE CHLORHYDRATE/FLUTICASONE PROPIONATE ARROW 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
 81	65773169	H	AZELASTINE CHLORHYDRATE/FLUTICASONE PROPIONATE SUBSTIPHARM 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
+81	65321616	H	AZELASTINE CHLORHYDRATE/FLUTICASONE PROPIONATE TEVA 137 microgrammes/ 50 microgrammes, suspension pour pulvérisation nasale	           
+81	61082446	H	AZELASTINE CHLORHYDRATE/FLUTICASONE PROPIONATE VIATRIS 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
 81	61056394	H	AZELASTINE CHLORHYDRATE/FLUTICASONE PROPIONATE ZENTIVA 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
 81	61878817	H	AZELASTINE CHLORHYDRATE/FLUTICASONE PROPIONATE ZYDUS 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
+81	62950276	H	AZELASTINE CHLORHYDRATE/PROPIONATE DE FLUTICASONE EG 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
 60	60868670	R	AZOPT 10 mg/ml, collyre en suspension	           
 42	66508241	H	BECLOMETASONE/FORMOTEROL BIOGARAN 100/6 microgrammes/dose, solution pour inhalation en flacon pressurisé	           
 47	60311408	H	BECLOMETASONE/FORMOTEROL BIOGARAN 200/6 microgrammes/dose, solution pour inhalation en flacon pressurisé	           
@@ -48,7 +52,10 @@
 59	65832913	H	BRINZOLAMIDE/TIMOLOL BIOGARAN 10 mg/mL + 5 mg/mL, collyre en suspension	           
 59	61083683	H	BRINZOLAMIDE/TIMOLOL ZENTIVA 10 mg/5 mg par mL, collyre en suspension	           
 82	61091445	H	CABESOL 500 microgrammes/g, shampooing	           
+79	69275301	H	CASARENEL 0,1 %/2,5 %, gel	           
+80	69042585	H	CASARENEL 0,3 %/2,5 %, gel	           
 78	60120260	H	CHLORHEXIDINE ARROW 0,20 %, solution pour bain de bouche	           
+78	60120260	H	CHLORHEXIDINE LIBERTY PHARMA 0,20 %, solution pour bain de bouche	CHANGEMENT
 64	66194520	H	CHLORHEXIDINE/BENZALKONIUM/ALCOOL BENZYLIQUE EG LABO CONSEIL, solution pour application cutanée	           
 65	63273126	H	CICLOPIROX OLAMINE ARROW 1%, crème	           
 66	64330943	H	CICLOPIROX OLAMINE ARROW 1,5 %, shampooing	           
@@ -63,7 +70,7 @@
 67	68680275	H	CONYDIX 80 mg/g, vernis à ongles médicamenteux	           
 61	69667569	R	DACRYOSERUM, solution pour lavage ophtalmique en récipient unidose	           
 68	63931033	R	DAIVOBET 50 microgrammes/0,5 mg/g, pommade	           
-81	68250971	H	DEMOLAPE 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	           
+81	68250971	H	DEMOLAPE 137 microgrammes/50 microgrammes, suspension pour pulvérisation nasale	CHANGEMENT
 73	62186241	R	DESOMEDINE 0,1 %, collyre en solution	           
 62	65059765	H	DIBRINOL 2 mg/mL + 5 mg/mL, collyre en solution	           
 83	60563188	H	DICLOFENAC TEVA SANTE 1 %, gel	           

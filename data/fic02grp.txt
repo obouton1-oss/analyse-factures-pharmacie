@@ -25,7 +25,7 @@
 757	86	Voie auriculaire	CIPROFLOXACINE (CHLORHYDRATE DE) équivalent à CIPROFLOXACINE 3 mg pour 1 mL + DEXAMETHASONE 1 mg pour 1 mL - CILOXADEX 3 mg/1 mg par mL, suspension pour instillation auriculaire
 375	82	Voie cutanée	CLOBÉTASOL (PROPIONATE DE) 500 microgrammes/g - CLOBEX 500 microgrammes/g, shampooing
 263	83	Voie cutanée	DICLOFÉNAC (DE DIÉTHYLAMINE) équivalent à DICLOFENAC SODIQUE 1 g pour 100 g - VOLTARENE EMULGEL 1 %, gel
-755	84	Voie nasale	FLUTICASONE (FUROATE DE) 27,5 mg pour 1 pulvérisation - AVAMYS 27,5 microgrammes/pulvérisation, suspension pour pulvérisation nasale
+755	84	Voie nasale	FLUTICASONE (FUROATE DE) 27,5 microgrammes pour 1 pulvérisation - AVAMYS 27,5 microgrammes/pulvérisation, suspension pour pulvérisation nasale
 615	45	Voie inhalée	FLUTICASONE (PROPIONATE DE) 125 microgrammes/dose + SALMETEROL (XINAFOATE DE) équivalent à SALMETEROL 25 microgrammes/dose - SERETIDE 125 microgrammes/25 microgrammes/dose, suspension pour inhalation en flacon pressurisé avec valve doseuse
 615	46	Voie inhalée	FLUTICASONE (PROPIONATE DE) 250 microgrammes/dose + SALMETEROL (XINAFOATE DE) équivalent à SALMETEROL 25 microgrammes/dose - SERETIDE 250 microgrammes/25 microgrammes/dose, suspension pour inhalation en flacon pressurisé avec valve doseuse
 752	76	Voie inhalée	GLYCOPYRRONIUM (BROMURE DE) équivalent à GLYCOPYRRONIUM 44 microgrammes - SEEBRI BREEZHALER 44 microgrammes, poudre pour inhalation en gélule
