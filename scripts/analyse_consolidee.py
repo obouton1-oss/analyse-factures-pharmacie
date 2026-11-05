@@ -88,6 +88,55 @@ OFFRE_TO_GENERIQUEUR = {
     "COLOPLAST Offre Ciblée 30% RSF": ("COLOPLAST (dispositifs)", False),
 }
 
+# ---------------------------------------------------------------------------
+# Exclusions de l'assiette de remontée de remise (RDP) Biogaran
+# ---------------------------------------------------------------------------
+# Molécules Biogaran entrées au répertoire des génériques EN COURS D'ANNÉE.
+# La BDPM étant toujours à jour, ces références ressortent "Générique
+# (répertoire)" sur l'ensemble de l'année, y compris sur les mois où elles
+# n'étaient pas encore au répertoire. Elles sont donc exclues de l'assiette
+# servant au calcul de la remontée de remise (plafond cumulé 40 %,
+# art. L138-9 CSS), sur toute l'année — décision pharmacien.
+#
+# Les lignes restent présentes dans le rapport et dans le CA total : seule
+# l'assiette remise les déduit. Le marquage est tracé ligne à ligne dans
+# l'onglet "Détail lignes" (colonnes "Exclu base remise" / "Motif exclusion").
+#
+# Clé = CIP13 (13 chiffres). Pour ajouter une référence : une ligne ici suffit,
+# tous les onglets et formules suivent automatiquement.
+EXCLUSIONS_BASE_REMISE = {
+    "3400930302750": "OXAZEPAM BIOGARAN 10 mg cp (groupe 1913 — Seresta 10)",
+    "3400930302774": "OXAZEPAM BIOGARAN 50 mg cp séc. (groupe 1914 — Seresta 50)",
+    "3400930265109": "AMITRIPTYLINE BIOGARAN 40 mg/mL sol. buv. (groupe 1866 — Laroxyl)",
+    "3400930336922": "NEFOPAM BIOGARAN 30 mg cp pell. (groupe 1829 — Acupan cp)",
+    "3400930039540": "NEFOPAM BIOGARAN 20 mg/2 mL inj. (groupe 908 — Acupan inj.)",
+}
+
+# Motif commun affiché dans le rapport pour toutes les références ci-dessus.
+MOTIF_EXCLUSION_REMISE = "Entrée au répertoire en cours d'année"
+
+# Libellés utilisés dans la colonne "Exclu base remise" de l'onglet Détail
+# lignes. Ce sont aussi les critères des SUMIFS des onglets de synthèse :
+# ne pas les modifier sans mettre à jour les formules.
+EXCL_OUI, EXCL_NON = "Oui", "Non"
+
+
+def cle_cip13(cip13):
+    """Normalise un CIP13 en clé de comparaison : chiffres uniquement.
+
+    Les trois parsers ne produisent pas tous le CIP sous la même forme
+    (espaces, séparateurs selon le gabarit de facture), donc on compare sur
+    les chiffres seuls pour éviter une exclusion silencieusement inopérante.
+    """
+    return re.sub(r"\D", "", str(cip13 or ""))
+
+
+def exclusion_base_remise(cip13):
+    """Renvoie (exclu: bool, detail: str) pour un CIP13 donné."""
+    detail = EXCLUSIONS_BASE_REMISE.get(cle_cip13(cip13))
+    return (detail is not None), (detail or "")
+
+
 MOIS_FR = {
     "JANVIER": 1, "FEVRIER": 2, "FÉVRIER": 2, "MARS": 3, "AVRIL": 4, "MAI": 5,
     "JUIN": 6, "JUILLET": 7, "AOUT": 8, "AOÛT": 8, "SEPTEMBRE": 9,
@@ -173,6 +222,7 @@ def _enrichir_ligne(r, periode, canal, bdpm, brand, is_gen):
     nat = bdpm.nature(r["cip13"])
     groupe_id, groupe_libelle = bdpm.groupe_generique(r["cip13"])
     hyb = nat.get("hybride") or {}
+    exclu, detail_exclu = exclusion_base_remise(r["cip13"])
     return {
         **r,
         "periode": periode,
@@ -186,6 +236,12 @@ def _enrichir_ligne(r, periode, canal, bdpm, brand, is_gen):
         "groupe_id": groupe_id,
         "groupe_libelle": groupe_libelle,
         "fabricant_titulaire": bdpm.fabricant(r["cip13"]),
+        # Exclusion de l'assiette de remontée de remise (cf.
+        # EXCLUSIONS_BASE_REMISE). N'affecte ni le CA, ni le type de
+        # médicament, ni l'analyse de fuite.
+        "exclu_base_remise": exclu,
+        "motif_exclusion_remise": MOTIF_EXCLUSION_REMISE if exclu else "",
+        "detail_exclusion_remise": detail_exclu,
     }
 
 
@@ -390,6 +446,10 @@ def build_sheet_detail(wb, all_rows):
         "Remboursement", "Qté Cdée", "Qté fact", "PPHT Unit (€)", "CA PPHT (€)",
         "Taux Remise", "Remise HT (€)", "Groupe générique (libellé BDPM)",
         "Fabricant (titulaire AMM)", "Rôle hybride (R/H)", "Canal",
+        # Colonnes S et T : ajoutées EN FIN de tableau à dessein, pour ne pas
+        # décaler les colonnes A/D/F/H/J/L/N/R référencées par les formules
+        # des onglets de synthèse.
+        "Exclu base remise", "Motif exclusion base remise",
     ]
     ws.append(headers)
     style_header_row(ws, 1, len(headers))
@@ -402,6 +462,8 @@ def build_sheet_detail(wb, all_rows):
             r["qte_cdee"], r["qte_fact"], r["ppht_unit"], r["ca_ppht"],
             r["taux_remise"] / 100, r["remise_ht"], r["groupe_libelle"] or "",
             r["fabricant_titulaire"] or "", r["hybride_role"], r["canal"],
+            EXCL_OUI if r.get("exclu_base_remise") else EXCL_NON,
+            r.get("motif_exclusion_remise", ""),
         ])
 
     n = len(all_rows) + 1
@@ -419,7 +481,7 @@ def build_sheet_detail(wb, all_rows):
 
     widths = {"A": 10, "B": 15, "C": 32, "D": 20, "E": 30, "F": 22, "G": 24,
               "H": 16, "I": 9, "J": 9, "K": 12, "L": 12, "M": 10, "N": 12,
-              "O": 35, "P": 26, "Q": 12, "R": 16}
+              "O": 35, "P": 26, "Q": 12, "R": 16, "S": 17, "T": 34}
     autosize(ws, widths)
     ws.freeze_panes = "A2"
     return ws, n
@@ -434,7 +496,8 @@ def build_sheet_genericqueur(wb, n_detail, labo_fills, genericqueurs):
 
     headers = ["Génériqueur", "Nb lignes", "Qté fact totale", "CA PPHT (€)",
                "Remise HT (€)", "% du CA génériqueurs", "CA Répertoire (€)",
-               "CA Hybride (€)", "CA Hors répertoire (€)", "CA Non remboursé (€)"]
+               "CA Hybride (€)", "CA Hors répertoire (€)", "CA Non remboursé (€)",
+               "dont exclu base remise (€)", "Assiette répertoire remisable (€)"]
     start_row = 4
     for i, h in enumerate(headers, start=1):
         ws.cell(row=start_row, column=i, value=h)
@@ -443,9 +506,10 @@ def build_sheet_genericqueur(wb, n_detail, labo_fills, genericqueurs):
     detail_sheet = "'Détail lignes'"
     # Colonnes de l'onglet Détail lignes (cf. build_sheet_detail) :
     # D=Laboratoire, F=Type de médicament, H=Remboursement, J=Qté fact,
-    # L=CA PPHT, N=Remise HT
+    # L=CA PPHT, N=Remise HT, S=Exclu base remise
     col_labo, col_type, col_remb = "D", "F", "H"
     col_qte, col_ca, col_remise = "J", "L", "N"
+    col_exclu = "S"
 
     first_data_row = start_row + 1
     for i, gq in enumerate(genericqueurs):
@@ -456,6 +520,7 @@ def build_sheet_genericqueur(wb, n_detail, labo_fills, genericqueurs):
         rng_ca = f"{detail_sheet}!${col_ca}$2:${col_ca}${n_detail}"
         rng_remise = f"{detail_sheet}!${col_remise}$2:${col_remise}${n_detail}"
         rng_remb = f"{detail_sheet}!${col_remb}$2:${col_remb}${n_detail}"
+        rng_exclu = f"{detail_sheet}!${col_exclu}$2:${col_exclu}${n_detail}"
 
         ws.cell(row=row, column=1, value=gq)
         ws.cell(row=row, column=2, value=f"=COUNTIF({rng_labo},A{row})")
@@ -466,17 +531,24 @@ def build_sheet_genericqueur(wb, n_detail, labo_fills, genericqueurs):
         ws.cell(row=row, column=8, value=f'=SUMIFS({rng_ca},{rng_labo},A{row},{rng_type},"Hybride")')
         ws.cell(row=row, column=9, value=f'=SUMIFS({rng_ca},{rng_labo},A{row},{rng_type},"Hors répertoire")')
         ws.cell(row=row, column=10, value=f'=SUMIFS({rng_ca},{rng_labo},A{row},{rng_remb},"Non remboursé (ou non renseigné)")')
+        # K : part du CA répertoire portée par des références exclues de
+        # l'assiette de remontée de remise (entrées au répertoire en cours
+        # d'année) — cf. EXCLUSIONS_BASE_REMISE.
+        ws.cell(row=row, column=11,
+                value=f'=SUMIFS({rng_ca},{rng_labo},A{row},{rng_type},"Générique (répertoire)",{rng_exclu},"{EXCL_OUI}")')
+        # L : assiette réellement retenue pour le calcul de la remontée.
+        ws.cell(row=row, column=12, value=f"=G{row}-K{row}")
 
     last_row = first_data_row + len(genericqueurs) - 1
     total_row = last_row + 1
     ws.cell(row=total_row, column=1, value="TOTAL").font = BOLD_FONT
-    for col in (2, 3, 4, 5, 7, 8, 9, 10):
+    for col in (2, 3, 4, 5, 7, 8, 9, 10, 11, 12):
         letter = get_column_letter(col)
         c = ws.cell(row=total_row, column=col, value=f"=SUM({letter}{first_data_row}:{letter}{last_row})")
         c.font = BOLD_FONT
 
     for row in range(first_data_row, total_row + 1):
-        for col in (4, 5, 7, 8, 9, 10):
+        for col in (4, 5, 7, 8, 9, 10, 11, 12):
             ws.cell(row=row, column=col).number_format = EUR_FMT
         ws.cell(row=row, column=6, value=f"=D{row}/D${total_row}")
         ws.cell(row=row, column=6).number_format = PCT_FMT
@@ -489,7 +561,8 @@ def build_sheet_genericqueur(wb, n_detail, labo_fills, genericqueurs):
             if fill is not None:
                 cell.fill = fill
 
-    widths = {"A": 20, "B": 11, "C": 15, "D": 14, "E": 14, "F": 12, "G": 16, "H": 14, "I": 18, "J": 16}
+    widths = {"A": 20, "B": 11, "C": 15, "D": 14, "E": 14, "F": 12, "G": 16,
+              "H": 14, "I": 18, "J": 16, "K": 18, "L": 20}
     autosize(ws, widths)
     return ws
 
@@ -523,7 +596,10 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
                 "voir onglet Méthodologie). Ne couvre que les lignes génériqueur "
                 "(hors dispositifs/nutrition/parapharmacie). Pour Biogaran, détail "
                 "par canal (OCP / Alliance / Biogaran Direct) sous chaque type de "
-                "médicament ; la ligne « Total » reprend l'agrégat des 3 canaux.")
+                "médicament ; la ligne « Total » reprend l'agrégat des 3 canaux. "
+                "Cet onglet présente le CA intégral : les références exclues de "
+                "l'assiette de remontée de remise y sont incluses — voir l'onglet "
+                "« Assiette remise Biogaran » pour l'assiette corrigée.")
     ws["A2"].font = SUBTITLE_FONT
 
     detail_sheet = "'Détail lignes'"
@@ -688,6 +764,131 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
     return ws
 
 
+# Plafond légal de remise cumulée sur les génériques remboursables
+# (art. L138-9 CSS) : remise facturée + remontée (RDP) ne peut excéder 40 %.
+PLAFOND_REMISE_GENERIQUES = 0.40
+
+
+def build_sheet_assiette_remise(wb, all_rows, n_detail):
+    """
+    Assiette de la remontée de remise (RDP) Biogaran, mois par mois.
+
+    Part du CA répertoire Biogaran et en déduit les références exclues
+    (entrées au répertoire en cours d'année — cf. EXCLUSIONS_BASE_REMISE),
+    pour obtenir l'assiette réellement retenue, le taux de remise pondéré
+    sur cette assiette, et la remontée théorique restant à percevoir au
+    plafond de 40 %.
+
+    Tout est en formules pointant sur l'onglet "Détail lignes" : les
+    montants restent vérifiables et recalculables dans Excel.
+    """
+    ws = wb.create_sheet("Assiette remise Biogaran")
+    ws["A1"] = "Assiette de la remontée de remise Biogaran — détail mensuel"
+    ws["A1"].font = TITLE_FONT
+    ws["A2"] = ("Les références Biogaran entrées au répertoire des génériques en cours "
+                "d'année sont déduites de l'assiette (colonne C), sur toute l'année. "
+                "La remontée théorique est un calcul au plafond de 40 % "
+                "(art. L138-9 CSS) : à rapprocher des avoirs RDP réellement reçus, "
+                "ce n'est pas un montant dû constaté.")
+    ws["A2"].font = SUBTITLE_FONT
+
+    detail_sheet = "'Détail lignes'"
+    # Colonnes de l'onglet Détail lignes (cf. build_sheet_detail) :
+    # A=Période, D=Laboratoire, F=Type de médicament, L=CA PPHT, N=Remise HT,
+    # S=Exclu base remise
+    rng_periode = f"{detail_sheet}!$A$2:$A${n_detail}"
+    rng_labo = f"{detail_sheet}!$D$2:$D${n_detail}"
+    rng_type = f"{detail_sheet}!$F$2:$F${n_detail}"
+    rng_ca = f"{detail_sheet}!$L$2:$L${n_detail}"
+    rng_remise = f"{detail_sheet}!$N$2:$N${n_detail}"
+    rng_exclu = f"{detail_sheet}!$S$2:$S${n_detail}"
+
+    base_crit = f'{rng_labo},"BIOGARAN",{rng_type},"Générique (répertoire)"'
+
+    headers = [
+        "Période",
+        "CA répertoire Biogaran (€)",
+        "dont exclu — entrée répertoire en cours d'année (€)",
+        "Assiette retenue (€)",
+        "Remise facturée sur assiette (€)",
+        "Taux de remise pondéré sur assiette",
+        "Plafond 40 % de l'assiette (€)",
+        "Remontée théorique restant à percevoir (€)",
+    ]
+    header_row = 4
+    for i, h in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=i, value=h)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    style_header_row(ws, header_row, len(headers))
+    ws.row_dimensions[header_row].height = 46
+
+    # Périodes réellement présentes sur des lignes répertoire Biogaran : inutile
+    # d'afficher un mois sans achat Biogaran au répertoire.
+    periodes = sorted(
+        {r["periode"] for r in all_rows
+         if r.get("genericqueur") == "BIOGARAN"
+         and r.get("type_medicament") == "Générique (répertoire)"},
+        key=periode_sort_key,
+    )
+
+    first_data_row = header_row + 1
+    for i, periode in enumerate(periodes):
+        row = first_data_row + i
+        per_crit = f',{rng_periode},"{periode}"'
+        ws.cell(row=row, column=1, value=periode)
+        ws.cell(row=row, column=2,
+                value=f'=SUMIFS({rng_ca},{base_crit}{per_crit})')
+        ws.cell(row=row, column=3,
+                value=f'=SUMIFS({rng_ca},{base_crit}{per_crit},{rng_exclu},"{EXCL_OUI}")')
+        ws.cell(row=row, column=4, value=f"=B{row}-C{row}")
+        # Remise facturée sur les seules lignes conservées dans l'assiette.
+        ws.cell(row=row, column=5,
+                value=f'=SUMIFS({rng_remise},{base_crit}{per_crit},{rng_exclu},"{EXCL_NON}")')
+        ws.cell(row=row, column=6, value=f"=IFERROR(E{row}/D{row},0)")
+        ws.cell(row=row, column=7, value=f"=D{row}*{PLAFOND_REMISE_GENERIQUES}")
+        ws.cell(row=row, column=8, value=f"=MAX(0,G{row}-E{row})")
+
+    last_row = first_data_row + len(periodes) - 1
+    total_row = last_row + 1
+    ws.cell(row=total_row, column=1, value="TOTAL")
+    for col in (2, 3, 4, 5):
+        letter = get_column_letter(col)
+        ws.cell(row=total_row, column=col,
+                value=f"=SUM({letter}{first_data_row}:{letter}{last_row})")
+    ws.cell(row=total_row, column=6, value=f"=IFERROR(E{total_row}/D{total_row},0)")
+    ws.cell(row=total_row, column=7, value=f"=D{total_row}*{PLAFOND_REMISE_GENERIQUES}")
+    ws.cell(row=total_row, column=8, value=f"=MAX(0,G{total_row}-E{total_row})")
+
+    for row in range(first_data_row, total_row + 1):
+        is_total = (row == total_row)
+        for col in (2, 3, 4, 5, 7, 8):
+            ws.cell(row=row, column=col).number_format = EUR_FMT
+        ws.cell(row=row, column=6).number_format = PCT_FMT
+        for col in range(1, len(headers) + 1):
+            cell = ws.cell(row=row, column=col)
+            cell.font = BOLD_FONT if is_total else NORMAL_FONT
+            cell.border = THIN_BORDER
+            if is_total:
+                cell.fill = TOTAL_FILL
+
+    # Rappel des références exclues, directement sous le tableau, pour que la
+    # ligne "dont exclu" soit lisible sans ouvrir le code.
+    row = total_row + 2
+    ws.cell(row=row, column=1,
+            value="Références Biogaran exclues de l'assiette "
+                  f"({MOTIF_EXCLUSION_REMISE.lower()})").font = BOLD_FONT
+    row += 1
+    for cip13, libelle in sorted(EXCLUSIONS_BASE_REMISE.items(), key=lambda kv: kv[1]):
+        ws.cell(row=row, column=1, value=cip13).font = NORMAL_FONT
+        ws.cell(row=row, column=2, value=libelle).font = NORMAL_FONT
+        row += 1
+
+    widths = {"A": 16, "B": 24, "C": 26, "D": 18, "E": 22, "F": 20, "G": 20, "H": 24}
+    autosize(ws, widths)
+    ws.freeze_panes = f"B{first_data_row}"
+    return ws
+
+
 def build_sheet_fuite(wb, all_rows, catalog_biogaran):
     ws = wb.create_sheet("Fuite Biogaran")
     ws["A1"] = "Analyse de fuite — génériques disponibles chez Biogaran achetés ailleurs"
@@ -817,6 +1018,8 @@ def build_sheet_resume(wb, all_rows, n_fuite):
         "→ 'Détail lignes' : chaque ligne produit enrichie (type, remboursement, hybride, fabricant)",
         "→ 'CA par génériqueur' : synthèse CA/remise par génériqueur, toutes périodes confondues",
         "→ 'CA type x laboratoire' : détail mensuel + total annuel par type de médicament et labo",
+        "→ 'Assiette remise Biogaran' : assiette de la remontée de remise, hors références "
+        "entrées au répertoire en cours d'année",
         "→ 'Fuite Biogaran' : achats faits ailleurs alors que Biogaran couvre le même générique, "
         "avec sous-totaux par laboratoire",
         "→ 'Méthodologie' : règles et limites de l'analyse (à lire avant interprétation)",
@@ -875,6 +1078,30 @@ def build_sheet_methodologie(wb):
         "CA PGHT) est attendu.",
         "- Taux de remise pondéré = Remise HT / CA PPHT (donc pondéré par le volume "
         "d'achat, pas une moyenne simple des taux ligne à ligne).",
+        "",
+        "ASSIETTE DE LA REMONTÉE DE REMISE (RDP) BIOGARAN",
+        "- La remise cumulée sur les génériques remboursables est plafonnée à 40 % "
+        "(art. L138-9 CSS) : remise facturée + remontée (RDP) ≤ 40 %. L'onglet "
+        "'Assiette remise Biogaran' calcule, mois par mois, l'assiette retenue et la "
+        "remontée théorique restant à percevoir à ce plafond.",
+        "- EXCLUSION : les molécules Biogaran entrées au répertoire des génériques EN "
+        "COURS D'ANNÉE sont déduites de cette assiette, sur toute l'année. Motif : les "
+        "fichiers BDPM sont toujours à jour, donc ces références ressortent 'Générique "
+        "(répertoire)' sur l'ensemble des périodes analysées, y compris sur les mois où "
+        "elles n'y étaient pas encore — les inclure gonflerait artificiellement "
+        "l'assiette.",
+        "- Les lignes concernées restent présentes partout ailleurs dans le rapport : le "
+        "CA total, la vue 'CA type x laboratoire' et l'analyse de fuite sont inchangés. "
+        "Seule l'assiette remise les déduit. Le marquage est tracé ligne à ligne dans "
+        "'Détail lignes' (colonnes 'Exclu base remise' et 'Motif exclusion base remise'), "
+        "et la liste des références est rappelée sous le tableau de l'onglet "
+        "'Assiette remise Biogaran'.",
+        "- La remontée théorique affichée est un CALCUL au plafond, pas un montant dû "
+        "constaté : elle doit être rapprochée des avoirs RDP réellement reçus de "
+        "Biogaran.",
+        "- Pour ajouter ou retirer une référence de l'exclusion, modifier le "
+        "dictionnaire EXCLUSIONS_BASE_REMISE (scripts/analyse_consolidee.py) : tous les "
+        "onglets et formules suivent automatiquement.",
         "",
         "ANALYSE DE FUITE BIOGARAN",
         "- Principe : un groupe générique (molécule + dosage + forme, code officiel "
@@ -936,6 +1163,7 @@ def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, allia
     _, n_detail = build_sheet_detail(wb, all_rows)
     build_sheet_genericqueur(wb, n_detail, labo_fills, genericqueurs)
     build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills)
+    build_sheet_assiette_remise(wb, all_rows, n_detail)
     _, n_fuite = build_sheet_fuite(wb, all_rows, catalog_biogaran)
     build_sheet_resume(wb, all_rows, n_fuite)
     build_sheet_methodologie(wb)
@@ -945,6 +1173,21 @@ def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, allia
     print(f"  {len(all_rows)} lignes produit, {len(fuite_rows)} lignes de fuite détectées")
     print(f"  Périodes : {', '.join(periodes)}")
     print(f"  CA PPHT total : {sum(r['ca_ppht'] for r in all_rows):,.2f} €")
+
+    # Contrôle de l'exclusion d'assiette : si un CIP13 listé dans
+    # EXCLUSIONS_BASE_REMISE n'est jamais rencontré, autant le signaler plutôt
+    # que de laisser croire que la déduction a été appliquée.
+    lignes_exclues = [r for r in all_rows if r.get("exclu_base_remise")]
+    ca_exclu = sum(r["ca_ppht"] for r in lignes_exclues)
+    cips_vus = {cle_cip13(r["cip13"]) for r in lignes_exclues}
+    print(f"  Assiette remise : {len(lignes_exclues)} ligne(s) exclue(s), "
+          f"{ca_exclu:,.2f} € de CA PPHT déduits de l'assiette Biogaran")
+    cips_absents = sorted(set(EXCLUSIONS_BASE_REMISE) - cips_vus)
+    if cips_absents:
+        print(f"  ⚠️  {len(cips_absents)} référence(s) d'exclusion jamais rencontrée(s) "
+              "dans les factures analysées :", file=sys.stderr)
+        for cip in cips_absents:
+            print(f"    {cip} — {EXCLUSIONS_BASE_REMISE[cip]}", file=sys.stderr)
 
     a_classifier = sorted({r["offre"] for r in all_rows if r["genericqueur"] == "À CLASSIFIER"})
     if a_classifier:
