@@ -52,7 +52,9 @@ BLOC_PRODUIT_RE = re.compile(
     # retire déjà les espaces, donc un simple élargissement de la classe
     # de caractères suffit (borné à 2 décimales pour ne pas déborder sur
     # le champ suivant).
-    r"(?P<qte>\d+)\s+(?P<unite>\S+)\s+(?P<pu>\d[\d ]*,\d{2})\s+(?P<tva>[\d.,]+)\s*%\s+(?P<montant>\d[\d ]*,\d{2})\n"
+    # Variante observée du 31/08 au 15/09/2026 : Alliance imprime le montant
+    # suivi de " EUR" ("25,08 EUR") — le suffixe est accepté et ignoré.
+    r"(?P<qte>\d+)\s+(?P<unite>\S+)\s+(?P<pu>\d[\d ]*,\d{2})\s+(?P<tva>[\d.,]+)\s*%\s+(?P<montant>\d[\d ]*,\d{2})(?:\s*EUR)?\n"
     # Certaines factures ajoutent un suffixe après la référence (ex. code
     # dépôt "191423 PHZ") : on capture toute la fin de ligne, pas seulement
     # le premier mot, sinon le bloc entier ne matche plus.
@@ -64,6 +66,9 @@ BLOC_PRODUIT_RE = re.compile(
 )
 
 NUM_FACTURE_RE = re.compile(r"N°\s*de facture\s*:\s*(\S+)")
+# Total imprimé en pied de facture, utilisé comme contrôle de cohérence :
+# la somme des lignes extraites doit retomber sur ce montant au centime.
+TOTAL_NET_HT_RE = re.compile(r"Montant Total net HT\s*:\s*(-?\d[\d ]*,\d{2})")
 DATE_FACTURE_RE = re.compile(r"Date de facturation\s*:\s*(\d{2}/\d{2}/\d{4})")
 
 # Mots-clés de désignation -> génériqueur. Reconstruits à partir de la liste
@@ -158,7 +163,11 @@ def extraire_facture_alliance(path_pdf):
             "date_facture": date_facture,
         })
 
-    return {"num_facture": num_facture, "date_facture": date_facture, "lignes": lignes}
+    total_m = TOTAL_NET_HT_RE.search(text)
+    total_net_ht = to_float(total_m.group(1)) if total_m else None
+
+    return {"num_facture": num_facture, "date_facture": date_facture,
+            "total_net_ht": total_net_ht, "lignes": lignes}
 
 
 def extraire_dossier(dossier_pdfs):

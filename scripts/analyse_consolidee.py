@@ -12,6 +12,7 @@ Peut aussi être importé et utilisé programmatiquement (voir build_report()).
 """
 import argparse
 import re
+import os
 import sys
 from pathlib import Path
 from collections import defaultdict
@@ -261,6 +262,20 @@ def enrich_rows_ocp(pdf_paths, bdpm):
     return all_rows
 
 
+def _controler_total(facture, pdf_path):
+    """Contrôle au centime : somme des montants nets des lignes extraites vs
+    "Montant Total net HT" imprimé sur la facture (quand le parser le fournit).
+    Un écart signale des lignes non reconnues (changement de mise en page)."""
+    total = facture.get("total_net_ht")
+    if total is None or not facture["lignes"]:
+        return
+    somme = round(sum(l["ca_pght"] for l in facture["lignes"]), 2)
+    if abs(somme - total) > 0.005:
+        print(f"⚠️  Écart de total sur {os.path.basename(pdf_path)} : lignes "
+              f"{somme:.2f} € vs facture {total:.2f} € net HT "
+              f"(écart {total - somme:.2f} €)", file=sys.stderr)
+
+
 def enrich_rows_biogaran_direct(pdf_paths, bdpm):
     """Canal Biogaran Direct : un PDF = une facture de livraison unitaire.
     Génériqueur toujours BIOGARAN (pas d'ambiguïté sur ce canal)."""
@@ -268,8 +283,14 @@ def enrich_rows_biogaran_direct(pdf_paths, bdpm):
     all_rows = []
     for pdf_path in pdf_paths:
         facture = extraire_facture_biogaran_direct(pdf_path)
+        if facture.get("type_document") == "avoir_rdp":
+            # Récapitulatif des remises Biogaran (avoir RDP) : pas une facture
+            # d'achat, aucune ligne produit à intégrer — ignoré sans alerte.
+            print(f"ℹ️  Avoir RDP ignoré : {os.path.basename(pdf_path)}", file=sys.stderr)
+            continue
         if not facture["lignes"]:
             print(f"⚠️  Aucune ligne produit trouvée dans {pdf_path}", file=sys.stderr)
+        _controler_total(facture, pdf_path)
         periode = periode_depuis_date_facture(facture["date_facture"])
         for r in facture["lignes"]:
             all_rows.append(_enrichir_ligne(r, periode, "Biogaran Direct", bdpm, "BIOGARAN", True))
@@ -331,8 +352,12 @@ def enrich_rows_alliance(pdf_paths, bdpm):
     all_rows = []
     for pdf_path in pdf_paths:
         facture = extraire_facture_alliance(pdf_path)
+        if not facture["lignes"] and facture.get("total_net_ht") == 0:
+            # Facture à 0 € (ex. produit gratuit seul) : rien à intégrer.
+            continue
         if not facture["lignes"]:
             print(f"⚠️  Aucune ligne produit trouvée dans {pdf_path}", file=sys.stderr)
+        _controler_total(facture, pdf_path)
         periode = periode_depuis_date_facture(facture["date_facture"])
         for r in facture["lignes"]:
             brand, is_gen = _resoudre_marque_alliance(r, bdpm)
