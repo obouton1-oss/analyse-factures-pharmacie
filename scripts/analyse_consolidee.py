@@ -224,22 +224,38 @@ def _enrichir_ligne(r, periode, canal, bdpm, brand, is_gen):
     groupe_id, groupe_libelle = bdpm.groupe_generique(r["cip13"])
     hyb = nat.get("hybride") or {}
     exclu, detail_exclu = exclusion_base_remise(r["cip13"])
+    repertoire = nat["repertoire"]
+    repertoire_force = False
+    if exclu and repertoire == "Hors répertoire":
+        # Une référence de EXCLUSIONS_BASE_REMISE est, par définition, entrée
+        # au répertoire en 2026. Si la BDPM ne l'a pas encore enregistrée
+        # (cas NEFOPAM BIOGARAN 30 mg, CIS 62781958 absent de CIS_GENER au
+        # 19/11/2026), on la classe quand même Générique (répertoire) pour
+        # qu'elle apparaisse au bon endroit — la règle reste de la garder
+        # dans le CA répertoire et de ne la retirer que de l'assiette.
+        repertoire = "Générique (répertoire)"
+        repertoire_force = True
+        if not groupe_libelle:
+            m_grp = re.search(r"\(([^)]*)\)\s*$", detail_exclu)
+            groupe_libelle = (m_grp.group(1) if m_grp else "") + \
+                " [classement forcé : BDPM pas encore à jour]"
     return {
         **r,
         "periode": periode,
         "canal": canal,
         "genericqueur": brand,
         "est_genericqueur": is_gen,
-        "repertoire": nat["repertoire"],
-        "type_medicament": type_medicament(nat["repertoire"]),
+        "repertoire": repertoire,
+        "type_medicament": type_medicament(repertoire),
+        "repertoire_force": repertoire_force,
         "remboursement": nat["remboursement"],
         "hybride_role": hyb.get("role") or "",
         "groupe_id": groupe_id,
         "groupe_libelle": groupe_libelle,
         "fabricant_titulaire": bdpm.fabricant(r["cip13"]),
         # Exclusion de l'assiette de remontée de remise (cf.
-        # EXCLUSIONS_BASE_REMISE). N'affecte ni le CA, ni le type de
-        # médicament, ni l'analyse de fuite.
+        # EXCLUSIONS_BASE_REMISE). N'affecte ni le CA, ni l'analyse de
+        # fuite ; le type n'est corrigé que si la BDPM est en retard.
         "exclu_base_remise": exclu,
         "motif_exclusion_remise": MOTIF_EXCLUSION_REMISE if exclu else "",
         "detail_exclusion_remise": detail_exclu,
@@ -1319,11 +1335,18 @@ def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, allia
     print(f"  Assiette remise : {len(lignes_exclues)} ligne(s) exclue(s), "
           f"{ca_exclu:,.2f} € de CA PPHT au total, dont {ca_deduit:,.2f} € "
           f"classés Générique (répertoire) et donc déduits de l'assiette Biogaran")
+    forces = sorted({cle_cip13(r["cip13"]) for r in lignes_exclues
+                     if r.get("repertoire_force")})
+    for cip in forces:
+        print(f"  ℹ️  {cip} ({EXCLUSIONS_BASE_REMISE[cip]}) : absent du répertoire "
+              "BDPM, classé Générique (répertoire) d'office (liste des exclusions)",
+              file=sys.stderr)
     hors_rep = sorted({cle_cip13(r["cip13"]) for r in lignes_exclues
-                       if r.get("type_medicament") != "Générique (répertoire)"})
+                       if r.get("genericqueur") == "BIOGARAN"
+                       and r.get("type_medicament") != "Générique (répertoire)"})
     for cip in hors_rep:
-        print(f"  ⚠️  Exclusion {cip} ({EXCLUSIONS_BASE_REMISE[cip]}) : classée hors "
-              "répertoire par la BDPM — n'est pas dans l'assiette, rien à déduire",
+        print(f"  ⚠️  Exclusion {cip} ({EXCLUSIONS_BASE_REMISE[cip]}) : classée "
+              "hors répertoire — n'est pas dans l'assiette, rien à déduire",
               file=sys.stderr)
     cips_absents = sorted(set(EXCLUSIONS_BASE_REMISE) - cips_vus)
     if cips_absents:
