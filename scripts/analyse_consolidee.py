@@ -620,6 +620,11 @@ CANAUX_BIOGARAN_DETAIL = ["OCP", "Alliance", "Biogaran Direct"]
 # elle n'est PAS ajoutée au TOTAL GÉNÉRAL (déjà incluse dans la ligne Total).
 LIGNE_EXCLUSIONS_REPERTOIRE = "dont exclusions répertoire"
 EXCL_FONT_COLOR = "9C5700"
+# Ligne suivante : assiette de remise = Total − exclusions (même calcul que
+# la colonne « Assiette retenue » de l'onglet Assiette remise Biogaran).
+# Ligne de lecture, elle non plus n'entre pas dans le TOTAL GÉNÉRAL.
+LIGNE_ASSIETTE_REMISE = "Assiette remise (Total − exclusions)"
+ASSIETTE_FONT_COLOR = "1F6F43"
 
 
 def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
@@ -646,7 +651,8 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
                 "médicament ; la ligne « Total » reprend l'agrégat des 3 canaux. "
                 "Cet onglet présente le CA intégral : les références exclues de "
                 "l'assiette de remontée de remise y sont incluses, isolées sur la "
-                "ligne « dont exclusions répertoire » et détaillées sous le tableau "
+                "ligne « dont exclusions répertoire » et détaillées sous le tableau ; "
+                "la ligne « Assiette remise » en dessous = Total − exclusions "
                 "— voir l'onglet « Assiette remise Biogaran » pour l'assiette corrigée.")
     ws["A2"].font = SUBTITLE_FONT
 
@@ -714,6 +720,7 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
             lignes_a_afficher.append((labo, type_med, "Total"))
             if type_med == "Générique (répertoire)" and EXCLUSIONS_BASE_REMISE:
                 lignes_a_afficher.append((labo, type_med, LIGNE_EXCLUSIONS_REPERTOIRE))
+                lignes_a_afficher.append((labo, type_med, LIGNE_ASSIETTE_REMISE))
         else:
             lignes_a_afficher.append((labo, type_med, None))
 
@@ -731,6 +738,18 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
         canal_crit = f',{rng_canal},"{canal}"' if canal in CANAUX_BIOGARAN_DETAIL else ""
         if canal == LIGNE_EXCLUSIONS_REPERTOIRE:
             canal_crit = f',{rng_exclu},"{EXCL_OUI}"'
+
+        if canal == LIGNE_ASSIETTE_REMISE:
+            for periode in list(periodes) + ["__TOTAL__"]:
+                c0 = period_col_start[periode] if periode != "__TOTAL__" else total_col_start
+                for off in (0, 1):
+                    L = get_column_letter(c0 + off)
+                    ws.cell(row=row, column=c0 + off, value=f"={L}{row - 2}-{L}{row - 1}")
+                ca_cell = f"{get_column_letter(c0)}{row}"
+                remise_cell = f"{get_column_letter(c0 + 1)}{row}"
+                ws.cell(row=row, column=c0 + 2, value=f"={ca_cell}-{remise_cell}")
+                ws.cell(row=row, column=c0 + 3, value=f"=IFERROR({remise_cell}/{ca_cell},0)")
+            continue
 
         for periode in periodes:
             c0 = period_col_start[periode]
@@ -765,7 +784,8 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
     ws.cell(row=total_row, column=1, value="TOTAL GÉNÉRAL").font = BOLD_FONT
     ws.merge_cells(start_row=total_row, start_column=1, end_row=total_row, end_column=3)
     exclusion_canaux = "".join(f',{get_column_letter(3)}{first_data_row}:{get_column_letter(3)}{last_row},"<>{c}"'
-                                for c in CANAUX_BIOGARAN_DETAIL + [LIGNE_EXCLUSIONS_REPERTOIRE])
+                                for c in CANAUX_BIOGARAN_DETAIL + [LIGNE_EXCLUSIONS_REPERTOIRE,
+                                                                   LIGNE_ASSIETTE_REMISE])
     for periode in list(periodes) + ["__TOTAL__"]:
         c0 = period_col_start[periode] if periode != "__TOTAL__" else total_col_start
         for offset in (0, 1):  # CA brut, Remise : sommables
@@ -788,6 +808,7 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
         is_canal_detail = canal_ligne in CANAUX_BIOGARAN_DETAIL
         is_sous_total_biogaran = (canal_ligne == "Total")
         is_ligne_exclusions = (canal_ligne == LIGNE_EXCLUSIONS_REPERTOIRE)
+        is_ligne_assiette = (canal_ligne == LIGNE_ASSIETTE_REMISE)
         fill = labo_fills.get(labo_ligne) if not is_total else None
         for periode in list(periodes) + ["__TOTAL__"]:
             c0 = period_col_start[periode] if periode != "__TOTAL__" else total_col_start
@@ -802,7 +823,10 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
                 if cell.font != BOLD_FONT:
                     cell.font = BOLD_FONT
             else:
-                if is_ligne_exclusions:
+                if is_ligne_assiette:
+                    cell.font = Font(name=FONT_NAME, bold=True, size=9,
+                                     color=ASSIETTE_FONT_COLOR)
+                elif is_ligne_exclusions:
                     cell.font = Font(name=FONT_NAME, italic=True, bold=True, size=9,
                                      color=EXCL_FONT_COLOR)
                 elif is_canal_detail:
