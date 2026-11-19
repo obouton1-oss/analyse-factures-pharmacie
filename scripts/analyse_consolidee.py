@@ -599,6 +599,12 @@ def build_sheet_genericqueur(wb, n_detail, labo_fills, genericqueurs):
 # se répartit entre les 3 flux d'approvisionnement.
 CANAUX_BIOGARAN_DETAIL = ["OCP", "Alliance", "Biogaran Direct"]
 
+# Ligne affichée sous "BIOGARAN / Générique (répertoire) / Total" : part de ce
+# CA portant sur les références de EXCLUSIONS_BASE_REMISE. Ligne "dont" :
+# elle n'est PAS ajoutée au TOTAL GÉNÉRAL (déjà incluse dans la ligne Total).
+LIGNE_EXCLUSIONS_REPERTOIRE = "dont exclusions répertoire"
+EXCL_FONT_COLOR = "9C5700"
+
 
 def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
     """
@@ -623,8 +629,9 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
                 "par canal (OCP / Alliance / Biogaran Direct) sous chaque type de "
                 "médicament ; la ligne « Total » reprend l'agrégat des 3 canaux. "
                 "Cet onglet présente le CA intégral : les références exclues de "
-                "l'assiette de remontée de remise y sont incluses — voir l'onglet "
-                "« Assiette remise Biogaran » pour l'assiette corrigée.")
+                "l'assiette de remontée de remise y sont incluses, isolées sur la "
+                "ligne « dont exclusions répertoire » et détaillées sous le tableau "
+                "— voir l'onglet « Assiette remise Biogaran » pour l'assiette corrigée.")
     ws["A2"].font = SUBTITLE_FONT
 
     detail_sheet = "'Détail lignes'"
@@ -636,6 +643,8 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
     rng_periode = f"{detail_sheet}!${col_periode}$2:${col_periode}${n_detail}"
     rng_ca = f"{detail_sheet}!${col_ca}$2:${col_ca}${n_detail}"
     rng_remise = f"{detail_sheet}!${col_remise}$2:${col_remise}${n_detail}"
+    rng_cip = f"{detail_sheet}!$B$2:$B${n_detail}"
+    rng_exclu = f"{detail_sheet}!$S$2:$S${n_detail}"
 
     header_row1, header_row2 = 4, 5
     ws.cell(row=header_row1, column=1, value="Laboratoire")
@@ -687,6 +696,8 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
             for canal in CANAUX_BIOGARAN_DETAIL:
                 lignes_a_afficher.append((labo, type_med, canal))
             lignes_a_afficher.append((labo, type_med, "Total"))
+            if type_med == "Générique (répertoire)" and EXCLUSIONS_BASE_REMISE:
+                lignes_a_afficher.append((labo, type_med, LIGNE_EXCLUSIONS_REPERTOIRE))
         else:
             lignes_a_afficher.append((labo, type_med, None))
 
@@ -702,6 +713,8 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
         # lignes des autres laboratoires restent agrégées tous canaux, comme
         # avant.
         canal_crit = f',{rng_canal},"{canal}"' if canal in CANAUX_BIOGARAN_DETAIL else ""
+        if canal == LIGNE_EXCLUSIONS_REPERTOIRE:
+            canal_crit = f',{rng_exclu},"{EXCL_OUI}"'
 
         for periode in periodes:
             c0 = period_col_start[periode]
@@ -736,7 +749,7 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
     ws.cell(row=total_row, column=1, value="TOTAL GÉNÉRAL").font = BOLD_FONT
     ws.merge_cells(start_row=total_row, start_column=1, end_row=total_row, end_column=3)
     exclusion_canaux = "".join(f',{get_column_letter(3)}{first_data_row}:{get_column_letter(3)}{last_row},"<>{c}"'
-                                for c in CANAUX_BIOGARAN_DETAIL)
+                                for c in CANAUX_BIOGARAN_DETAIL + [LIGNE_EXCLUSIONS_REPERTOIRE])
     for periode in list(periodes) + ["__TOTAL__"]:
         c0 = period_col_start[periode] if periode != "__TOTAL__" else total_col_start
         for offset in (0, 1):  # CA brut, Remise : sommables
@@ -758,6 +771,7 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
         canal_ligne = ws.cell(row=row, column=3).value
         is_canal_detail = canal_ligne in CANAUX_BIOGARAN_DETAIL
         is_sous_total_biogaran = (canal_ligne == "Total")
+        is_ligne_exclusions = (canal_ligne == LIGNE_EXCLUSIONS_REPERTOIRE)
         fill = labo_fills.get(labo_ligne) if not is_total else None
         for periode in list(periodes) + ["__TOTAL__"]:
             c0 = period_col_start[periode] if periode != "__TOTAL__" else total_col_start
@@ -772,7 +786,10 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
                 if cell.font != BOLD_FONT:
                     cell.font = BOLD_FONT
             else:
-                if is_canal_detail:
+                if is_ligne_exclusions:
+                    cell.font = Font(name=FONT_NAME, italic=True, bold=True, size=9,
+                                     color=EXCL_FONT_COLOR)
+                elif is_canal_detail:
                     cell.font = Font(name=FONT_NAME, italic=True, size=9, color="555555")
                 elif is_sous_total_biogaran:
                     cell.font = BOLD_FONT
@@ -780,6 +797,97 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
                     cell.font = NORMAL_FONT
                 if fill is not None:
                     cell.fill = fill
+
+    # Liste des références exclues, sous le tableau : une ligne par CIP13 avec
+    # le même détail mensuel ; leur somme = ligne « dont exclusions répertoire ».
+    if EXCLUSIONS_BASE_REMISE:
+        row = total_row + 2
+        titre = ws.cell(row=row, column=1,
+                        value="Exclusions répertoire — références Biogaran entrées au "
+                              "répertoire en cours d'année, déduites de l'assiette de "
+                              "remontée de remise (incluses dans le CA ci-dessus)")
+        titre.font = BOLD_FONT
+        row += 1
+        types_par_cip = defaultdict(set)
+        for r_ in all_rows:
+            if r_.get("exclu_base_remise"):
+                types_par_cip[cle_cip13(r_["cip13"])].add(r_.get("type_medicament") or "")
+        for c, lbl in enumerate(["CIP13", "Libellé", "Classement (BDPM)"], start=1):
+            cell = ws.cell(row=row, column=c, value=lbl)
+            cell.font = SUBHEADER_FONT
+            cell.fill = SUBHEADER_FILL
+            cell.border = THIN_BORDER
+        row += 1
+        first_excl_row = row
+        for cip13, libelle in sorted(EXCLUSIONS_BASE_REMISE.items(), key=lambda kv: kv[1]):
+            ws.cell(row=row, column=1, value=cip13)
+            ws.cell(row=row, column=2, value=libelle)
+            ws.cell(row=row, column=3,
+                    value=" / ".join(sorted(types_par_cip.get(cip13, set())))
+                    or "Non acheté sur la période")
+            for periode in list(periodes) + ["__TOTAL__"]:
+                c0 = period_col_start[periode] if periode != "__TOTAL__" else total_col_start
+                per_crit = f',{rng_periode},"{periode}"' if periode != "__TOTAL__" else ""
+                ca_cell = f"{get_column_letter(c0)}{row}"
+                remise_cell = f"{get_column_letter(c0 + 1)}{row}"
+                ws.cell(row=row, column=c0,
+                        value=f'=SUMIFS({rng_ca},{rng_cip},$A{row}{per_crit})')
+                ws.cell(row=row, column=c0 + 1,
+                        value=f'=SUMIFS({rng_remise},{rng_cip},$A{row}{per_crit})')
+                ws.cell(row=row, column=c0 + 2, value=f"={ca_cell}-{remise_cell}")
+                ws.cell(row=row, column=c0 + 3, value=f"=IFERROR({remise_cell}/{ca_cell},0)")
+            row += 1
+        last_excl_row = row - 1
+        # Ligne 1 : total de toutes les références listées.
+        ws.cell(row=row, column=1, value="Total références exclues")
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+        for periode in list(periodes) + ["__TOTAL__"]:
+            c0 = period_col_start[periode] if periode != "__TOTAL__" else total_col_start
+            for offset in (0, 1):
+                letter = get_column_letter(c0 + offset)
+                ws.cell(row=row, column=c0 + offset,
+                        value=f"=SUM({letter}{first_excl_row}:{letter}{last_excl_row})")
+            ca_cell = f"{get_column_letter(c0)}{row}"
+            remise_cell = f"{get_column_letter(c0 + 1)}{row}"
+            ws.cell(row=row, column=c0 + 2, value=f"={ca_cell}-{remise_cell}")
+            ws.cell(row=row, column=c0 + 3, value=f"=IFERROR({remise_cell}/{ca_cell},0)")
+        # Ligne 2 : seules les références classées Générique (répertoire) sont
+        # dans l'assiette, donc réellement déduites — égale à la ligne
+        # « dont exclusions répertoire » du tableau.
+        row += 1
+        ws.cell(row=row, column=1,
+                value="dont déduit de l'assiette (classé Générique répertoire)")
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+        rng_cls = f"$C${first_excl_row}:$C${last_excl_row}"
+        for periode in list(periodes) + ["__TOTAL__"]:
+            c0 = period_col_start[periode] if periode != "__TOTAL__" else total_col_start
+            for offset in (0, 1):
+                letter = get_column_letter(c0 + offset)
+                ws.cell(row=row, column=c0 + offset,
+                        value=f'=SUMIFS({letter}{first_excl_row}:{letter}{last_excl_row},'
+                              f'{rng_cls},"Générique (répertoire)")')
+            ca_cell = f"{get_column_letter(c0)}{row}"
+            remise_cell = f"{get_column_letter(c0 + 1)}{row}"
+            ws.cell(row=row, column=c0 + 2, value=f"={ca_cell}-{remise_cell}")
+            ws.cell(row=row, column=c0 + 3, value=f"=IFERROR({remise_cell}/{ca_cell},0)")
+        total_excl_row = row
+        for r in range(first_excl_row, total_excl_row + 1):
+            for periode in list(periodes) + ["__TOTAL__"]:
+                c0 = period_col_start[periode] if periode != "__TOTAL__" else total_col_start
+                for off in (0, 1, 2):
+                    ws.cell(row=r, column=c0 + off).number_format = EUR_FMT
+                ws.cell(row=r, column=c0 + 3).number_format = PCT_FMT
+            for c in range(1, n_cols_total + 1):
+                cell = ws.cell(row=r, column=c)
+                cell.border = THIN_BORDER
+                if r >= last_excl_row + 1:
+                    cell.font = Font(name=FONT_NAME, bold=True, size=9, color=EXCL_FONT_COLOR)
+                    cell.fill = TOTAL_FILL
+                else:
+                    cell.font = NORMAL_FONT
+            if r <= last_excl_row:
+                ws.cell(row=r, column=2).alignment = Alignment(wrap_text=True, vertical="center")
+                ws.cell(row=r, column=3).alignment = Alignment(wrap_text=True, vertical="center")
 
     widths = {"A": 18, "B": 22, "C": 16}
     for c in range(4, n_cols_total + 1):
@@ -1205,8 +1313,18 @@ def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, allia
     lignes_exclues = [r for r in all_rows if r.get("exclu_base_remise")]
     ca_exclu = sum(r["ca_ppht"] for r in lignes_exclues)
     cips_vus = {cle_cip13(r["cip13"]) for r in lignes_exclues}
+    ca_deduit = sum(r["ca_ppht"] for r in lignes_exclues
+                    if r.get("genericqueur") == "BIOGARAN"
+                    and r.get("type_medicament") == "Générique (répertoire)")
     print(f"  Assiette remise : {len(lignes_exclues)} ligne(s) exclue(s), "
-          f"{ca_exclu:,.2f} € de CA PPHT déduits de l'assiette Biogaran")
+          f"{ca_exclu:,.2f} € de CA PPHT au total, dont {ca_deduit:,.2f} € "
+          f"classés Générique (répertoire) et donc déduits de l'assiette Biogaran")
+    hors_rep = sorted({cle_cip13(r["cip13"]) for r in lignes_exclues
+                       if r.get("type_medicament") != "Générique (répertoire)"})
+    for cip in hors_rep:
+        print(f"  ⚠️  Exclusion {cip} ({EXCLUSIONS_BASE_REMISE[cip]}) : classée hors "
+              "répertoire par la BDPM — n'est pas dans l'assiette, rien à déduire",
+              file=sys.stderr)
     cips_absents = sorted(set(EXCLUSIONS_BASE_REMISE) - cips_vus)
     if cips_absents:
         print(f"  ⚠️  {len(cips_absents)} référence(s) d'exclusion jamais rencontrée(s) "
