@@ -15,6 +15,7 @@ import sys
 import tempfile
 import shutil
 import traceback
+import unicodedata
 import io
 import re
 import zipfile
@@ -23,6 +24,7 @@ from contextlib import redirect_stdout, redirect_stderr
 from datetime import datetime
 from pathlib import Path
 
+import pdfplumber
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parent
@@ -159,7 +161,7 @@ verifier_mot_de_passe()
 st.markdown(f"""
 <div class="app-header">
     <h1>💊 Analyses factures génériques</h1>
-    <p>Dépose les PDF de chaque canal ci-dessous, puis génère le rapport Excel consolidé.</p>
+    <p>Dépose le dossier de tes factures (tous mois confondus), puis génère le rapport Excel consolidé.</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -192,33 +194,19 @@ def nouvelle_analyse():
     st.session_state.error_text = None
 
 
-def expand_uploads(files):
+def deplier_fichiers(files):
     """Retourne une liste de (nom_fichier, contenu_bytes) à partir des
     fichiers déposés : les PDF sont pris tels quels, les .zip sont dépliés
-    (chaque PDF trouvé à l'intérieur est extrait, les dossiers/fichiers
-    système macOS type __MACOSX ou ._xxx sont ignorés). Permet de déposer un
-    dossier entier compressé plutôt que de sélectionner chaque PDF un par
-    un — le navigateur ne permet pas de glisser un dossier non compressé
-    directement sur la zone de dépôt.
-
-    Déduplique aussi au passage par empreinte du contenu (sha256) : si le
-    même PDF est déposé deux fois (dépôt en plusieurs fois, PDF présent à la
-    fois seul et dans un .zip...), il n'est gardé qu'une fois."""
+    (chaque PDF trouvé à l'intérieur est extrait). Les fichiers système macOS
+    (__MACOSX, ._xxx) et tout ce qui n'est pas un PDF (.DS_Store, Excel...)
+    sont ignorés — utile en dépôt de dossier, où tout le contenu du dossier
+    est envoyé. Le nom est réduit au nom de fichier seul (sans le chemin des
+    sous-dossiers)."""
     resultat = []
-    vus = set()
-    doublons = 0
-
-    def ajouter(nom, contenu):
-        nonlocal doublons
-        empreinte = hashlib.sha256(contenu).hexdigest()
-        if empreinte in vus:
-            doublons += 1
-            return
-        vus.add(empreinte)
-        resultat.append((nom, contenu))
-
     for f in files or []:
-        nom = f.name
+        nom = Path(f.name).name
+        if nom.startswith("._"):
+            continue
         if nom.lower().endswith(".zip"):
             try:
                 with zipfile.ZipFile(io.BytesIO(f.getvalue())) as zf:
@@ -227,66 +215,170 @@ def expand_uploads(files):
                             continue
                         if entry.startswith("__MACOSX") or "/._" in entry or entry.startswith("._"):
                             continue
-                        ajouter(Path(entry).name, zf.read(entry))
+                        resultat.append((Path(entry).name, zf.read(entry)))
             except zipfile.BadZipFile:
                 st.warning(f"⚠️ {nom} n'est pas une archive .zip valide, ignoré.")
-        else:
-            ajouter(nom, f.getvalue())
-
-    if doublons:
-        st.caption(f"🔁 {doublons} doublon(s) détecté(s) et ignoré(s) (fichier identique déjà déposé).")
+        elif nom.lower().endswith(".pdf"):
+            resultat.append((nom, f.getvalue()))
     return resultat
 
 
+# Reconnaissance du canal d'un PDF d'après le texte de sa 1re page (accents
+# retirés, majuscules). Règles vérifiées le 20/11/2026 sur les 2 417 PDF de
+# factures_a_traiter/archive : 100 % concordants avec le tri existant
+# (récaps OCP, Alliance, Biogaran Direct CSP et Biogaran en direct, avoirs
+# RDP Biogaran ; factures OCP individuelles et EMAC non reconnues, donc
+# ignorées comme attendu).
+def _normaliser(texte):
+    return "".join(
+        c for c in unicodedata.normalize("NFKD", texte) if not unicodedata.combining(c)
+    ).upper()
+
+
+def detecter_canal(contenu):
+    """Canal du PDF : "ocp" (récap BO-OFFREM), "alliance", "biogaran",
+    "avoir_biogaran" (avoir RDP, non pris en compte), ou None s'il n'est pas
+    reconnu (facture OCP individuelle, EMAC, autre fournisseur, PDF
+    illisible...)."""
+    try:
+        with pdfplumber.open(io.BytesIO(contenu)) as pdf:
+            if not pdf.pages:
+                return None
+            t = _normaliser(pdf.pages[0].extract_text() or "")
+    except Exception:
+        return None
+    if "BO-OFFREM" in t:
+        return "ocp"
+    if "ALLIANCE HEALTHCARE" in t:
+        return "alliance"
+    if "BIOGARAN" in t and "RECAPITULATIF DES REMISES" in t:
+        return "avoir_biogaran"
+    if ("BIOGARAN" in t and "AU NOM ET POUR LE COMPTE DE" in t) \
+            or "DENOMINATION SOCIALE : BIOGARAN" in t:
+        return "biogaran"
+    return None
+
+
+def classer_automatiquement(fichiers):
+    """Ajoute le canal détecté à chaque (nom, contenu, empreinte). Le résultat
+    est mémorisé par empreinte pour la session : Streamlit relance le script à
+    chaque clic, on ne relit donc chaque PDF qu'une seule fois."""
+    cache = st.session_state.setdefault("canal_cache", {})
+    a_lire = [x for x in fichiers if x[2] not in cache]
+    if a_lire:
+        barre = st.progress(0.0, text=f"Reconnaissance des factures (0/{len(a_lire)})…")
+        for i, (nom, contenu, empreinte) in enumerate(a_lire, 1):
+            cache[empreinte] = detecter_canal(contenu)
+            if i % 10 == 0 or i == len(a_lire):
+                barre.progress(i / len(a_lire), text=f"Reconnaissance des factures ({i}/{len(a_lire)})…")
+        barre.empty()
+    return [(nom, contenu, empreinte, cache[empreinte]) for nom, contenu, empreinte in fichiers]
+
+
+def avec_empreinte(fichiers):
+    return [(nom, contenu, hashlib.sha256(contenu).hexdigest()) for nom, contenu in fichiers]
+
+
+def uploader_dossiers(label, key):
+    """Zone de dépôt acceptant des dossiers entiers (sous-dossiers compris).
+    Repli sur le dépôt multi-fichiers classique si la version de Streamlit
+    installée ne connaît pas encore le mode "directory"."""
+    try:
+        return st.file_uploader(
+            label, type=["pdf", "zip"], accept_multiple_files="directory",
+            key=key, label_visibility="collapsed",
+        )
+    except Exception:
+        return st.file_uploader(
+            label, type=["pdf", "zip"], accept_multiple_files=True,
+            key=key, label_visibility="collapsed",
+        )
+
+
 # ---------------------------------------------------------------------------
-# Zones de dépôt (3 canaux)
+# Dépôt global : un ou plusieurs dossiers, tri automatique par canal
 # ---------------------------------------------------------------------------
-col1, col2, col3 = st.columns(3)
+st.markdown('<div class="canal-card" style="--accent:#1F3864">', unsafe_allow_html=True)
+st.markdown("### 📂 Dépôt des factures — tous canaux, tous mois")
+st.markdown(
+    '<div class="sub">Clique sur <b>Browse files</b> et choisis le dossier qui contient tous tes '
+    'dossiers mensuels (par ex. « Factures 2026 ») : tous les sous-dossiers sont lus d\'un coup. '
+    'Chaque PDF est reconnu automatiquement (OCP, Alliance ou Biogaran Direct) d\'après son contenu, '
+    'peu importe le dossier où il est rangé. Recliquer permet d\'ajouter un autre dossier.</div>',
+    unsafe_allow_html=True,
+)
+global_raw = uploader_dossiers("Dossiers de factures", key=f"global_{k}")
+st.markdown('</div>', unsafe_allow_html=True)
 
-with col1:
-    st.markdown('<div class="canal-card" style="--accent:#2E86C1">', unsafe_allow_html=True)
-    st.markdown("### 📋 OCP")
-    st.markdown('<div class="sub">Récapitulatifs mensuels BO-OFFREM — PDF individuels ou dossier zippé</div>', unsafe_allow_html=True)
-    ocp_raw = st.file_uploader(
-        "PDF OCP", type=["pdf", "zip"], accept_multiple_files=True,
-        key=f"ocp_{k}", label_visibility="collapsed",
-    )
-    ocp_files = expand_uploads(ocp_raw)
-    st.caption(f"{len(ocp_files)} PDF détecté(s)" if ocp_files else "Aucun fichier pour l'instant")
-    st.markdown('</div>', unsafe_allow_html=True)
+with st.expander("Dépôt manuel par canal (si un PDF n'est pas reconnu automatiquement)"):
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown("**📋 OCP** — récapitulatifs BO-OFFREM")
+        ocp_raw = st.file_uploader(
+            "PDF OCP", type=["pdf", "zip"], accept_multiple_files=True,
+            key=f"ocp_{k}", label_visibility="collapsed",
+        )
+    with col2:
+        st.markdown("**🏥 Alliance Healthcare** — factures grossiste")
+        alliance_raw = st.file_uploader(
+            "PDF Alliance", type=["pdf", "zip"], accept_multiple_files=True,
+            key=f"alliance_{k}", label_visibility="collapsed",
+        )
+    with col3:
+        st.markdown("**💊 Biogaran Direct** — factures (facture_*.pdf)")
+        biogaran_raw = st.file_uploader(
+            "PDF Biogaran", type=["pdf", "zip"], accept_multiple_files=True,
+            key=f"biogaran_{k}", label_visibility="collapsed",
+        )
 
-with col2:
-    st.markdown('<div class="canal-card" style="--accent:#28B463">', unsafe_allow_html=True)
-    st.markdown("### 🏥 Alliance Healthcare")
-    st.markdown('<div class="sub">Factures grossiste (relevés mensuels ignorés automatiquement) — PDF individuels ou dossier zippé</div>', unsafe_allow_html=True)
-    alliance_raw = st.file_uploader(
-        "PDF Alliance", type=["pdf", "zip"], accept_multiple_files=True,
-        key=f"alliance_{k}", label_visibility="collapsed",
-    )
-    alliance_files = expand_uploads(alliance_raw)
-    st.caption(f"{len(alliance_files)} PDF détecté(s)" if alliance_files else "Aucun fichier pour l'instant")
-    st.markdown('</div>', unsafe_allow_html=True)
+# Regroupement : dépôt global (canal détecté) + dépôts manuels (canal imposé),
+# dédoublonnage par contenu sur l'ensemble.
+entrees = classer_automatiquement(avec_empreinte(deplier_fichiers(global_raw)))
+for raw, canal in ((ocp_raw, "ocp"), (alliance_raw, "alliance"), (biogaran_raw, "biogaran")):
+    entrees += [(nom, c, e, canal) for nom, c, e in avec_empreinte(deplier_fichiers(raw))]
 
-with col3:
-    st.markdown('<div class="canal-card" style="--accent:#E67E22">', unsafe_allow_html=True)
-    st.markdown("### 💊 Biogaran Direct")
-    st.markdown('<div class="sub">Factures (facture_*.pdf) — PDF individuels ou dossier zippé. Les avoirs (avoir_*.pdf) sont ignorés s\'ils sont déposés.</div>', unsafe_allow_html=True)
-    biogaran_raw = st.file_uploader(
-        "PDF Biogaran", type=["pdf", "zip"], accept_multiple_files=True,
-        key=f"biogaran_{k}", label_visibility="collapsed",
-    )
-    biogaran_files_brutes = expand_uploads(biogaran_raw)
-    biogaran_files = [(nom, c) for nom, c in biogaran_files_brutes if not nom.lower().startswith("avoir_")]
-    n_avoir_ignores = len(biogaran_files_brutes) - len(biogaran_files)
-    if biogaran_files:
-        st.caption(f"{len(biogaran_files)} facture(s) détectée(s)" + (f" — {n_avoir_ignores} avoir(s) ignoré(s)" if n_avoir_ignores else ""))
-    elif n_avoir_ignores:
-        st.caption(f"{n_avoir_ignores} avoir(s) déposé(s), ignoré(s) (non pris en compte)")
+par_canal = {"ocp": [], "alliance": [], "biogaran": []}
+ignores = []   # (nom, raison)
+vus = set()
+doublons = 0
+for nom, contenu, empreinte, canal in entrees:
+    if empreinte in vus:
+        doublons += 1
+        continue
+    vus.add(empreinte)
+    if canal is None:
+        ignores.append((nom, "non reconnu (facture OCP individuelle, EMAC, autre fournisseur…)"))
+    elif canal == "avoir_biogaran" or (canal == "biogaran" and nom.lower().startswith("avoir_")):
+        ignores.append((nom, "avoir Biogaran (non pris en compte)"))
     else:
-        st.caption("Aucun fichier pour l'instant")
-    st.markdown('</div>', unsafe_allow_html=True)
+        par_canal[canal].append((nom, contenu))
 
-st.caption("💡 Astuce : pour déposer un dossier entier d'un coup, compresse-le en .zip sur ton Mac (clic droit → Compresser) puis glisse le .zip — les PDF à l'intérieur seront détectés automatiquement.")
+ocp_files = par_canal["ocp"]
+alliance_files = par_canal["alliance"]
+biogaran_files = par_canal["biogaran"]
+
+if entrees:
+    m1, m2, m3, m4 = st.columns(4)
+    for col, val, lbl in (
+        (m1, len(ocp_files), "📋 Récaps OCP"),
+        (m2, len(alliance_files), "🏥 PDF Alliance"),
+        (m3, len(biogaran_files), "💊 Factures Biogaran"),
+        (m4, len(ignores), "Ignorés"),
+    ):
+        col.markdown(f"""
+        <div class="kpi-box">
+            <div class="val">{val}</div>
+            <div class="lbl">{lbl}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    if doublons:
+        st.caption(f"🔁 {doublons} doublon(s) détecté(s) et ignoré(s) (fichier identique déjà déposé).")
+    if ignores:
+        with st.expander(f"Voir les {len(ignores)} fichier(s) ignoré(s)"):
+            st.dataframe(
+                [{"Fichier": n, "Raison": r} for n, r in sorted(ignores)],
+                width="stretch", hide_index=True,
+            )
 
 st.write("")
 bcol1, bcol2, _ = st.columns([1, 1, 3])
@@ -319,7 +411,7 @@ def parse_kpis(log_text):
 
 if generer:
     if total_fichiers == 0:
-        st.warning("Dépose au moins un PDF dans une des 3 zones avant de générer le rapport.")
+        st.warning("Aucune facture reconnue : dépose au moins un dossier ou un PDF avant de générer le rapport.")
     else:
         with st.spinner("Analyse en cours… (peut prendre plusieurs minutes si beaucoup de factures Alliance)"):
             tmp_dir = Path(tempfile.mkdtemp(prefix="analyse_pharma_"))
@@ -329,7 +421,15 @@ if generer:
                     dossier.mkdir(parents=True, exist_ok=True)
                     chemins = []
                     for nom, contenu in files or []:
+                        # Deux PDF différents peuvent porter le même nom
+                        # (ex. un récap OCP par mois rangé dans des dossiers
+                        # mensuels différents) : on numérote au lieu
+                        # d'écraser.
                         chemin = dossier / nom
+                        n = 1
+                        while chemin.exists():
+                            chemin = dossier / f"{Path(nom).stem}_{n}{Path(nom).suffix}"
+                            n += 1
                         chemin.write_bytes(contenu)
                         chemins.append(str(chemin))
                     return chemins
