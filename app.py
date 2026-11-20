@@ -307,6 +307,12 @@ st.markdown(
     'peu importe le dossier où il est rangé. Recliquer permet d\'ajouter un autre dossier.</div>',
     unsafe_allow_html=True,
 )
+st.info(
+    "⚠️ Les factures OCP individuelles (plus d'un millier par an, ~200 Mo) et les EMAC "
+    "ne servent pas au rapport : si elles se trouvent dans le dossier choisi, elles sont "
+    "envoyées puis ignorées, ce qui rallonge nettement l'envoi. Mieux vaut les ranger "
+    "dans un dossier à part avant le dépôt."
+)
 global_raw = uploader_dossiers("Dossiers de factures", key=f"global_{k}")
 st.markdown('</div>', unsafe_allow_html=True)
 
