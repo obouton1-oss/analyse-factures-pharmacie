@@ -105,9 +105,20 @@ st.markdown(f"""
         position: sticky;
         top: 0;
         z-index: 1;
-        background: #FAFBFC;
+        background: {NAVY};
+        color: white;
+        width: 2.2rem;
+        height: 2.2rem;
+        min-height: 2.2rem;
         border-radius: 50%;
         box-shadow: 0 0 0 3px #FAFBFC;
+    }}
+    div[data-testid="stFileChips"] > button[aria-label="Add files"]:hover {{
+        background: {NAVY_LIGHT};
+        color: white;
+    }}
+    div[data-testid="stFileChips"] > button[aria-label="Add files"] span {{
+        font-size: 1.4rem;
     }}
     div[data-testid="stFileUploaderFile"] {{
         display: none !important;
@@ -283,9 +294,12 @@ def uploader_dossiers(label, key):
     """Zone de dépôt acceptant des dossiers entiers (sous-dossiers compris).
     Repli sur le dépôt multi-fichiers classique si la version de Streamlit
     installée ne connaît pas encore le mode "directory"."""
+    # Pas de filtre de type côté navigateur en mode dossier : sinon chaque
+    # fichier non-PDF des dossiers (.DS_Store créé par macOS...) s'affiche
+    # en erreur rouge. Le tri PDF/.zip est fait par deplier_fichiers().
     try:
         return st.file_uploader(
-            label, type=["pdf", "zip"], accept_multiple_files="directory",
+            label, accept_multiple_files="directory",
             key=key, label_visibility="collapsed",
         )
     except Exception:
@@ -301,10 +315,11 @@ def uploader_dossiers(label, key):
 st.markdown('<div class="canal-card" style="--accent:#1F3864">', unsafe_allow_html=True)
 st.markdown("### 📂 Dépôt des factures — tous canaux, tous mois")
 st.markdown(
-    '<div class="sub">Clique sur <b>Browse files</b> et choisis le dossier qui contient tous tes '
+    '<div class="sub">Clique sur <b>Upload directories</b> et choisis le dossier qui contient tous tes '
     'dossiers mensuels (par ex. « Factures 2026 ») : tous les sous-dossiers sont lus d\'un coup. '
     'Chaque PDF est reconnu automatiquement (OCP, Alliance ou Biogaran Direct) d\'après son contenu, '
-    'peu importe le dossier où il est rangé. Recliquer permet d\'ajouter un autre dossier.</div>',
+    'peu importe le dossier où il est rangé. Le bouton <b>+</b> permet ensuite d\'ajouter un autre dossier ; '
+    'les <b>+</b> sous les compteurs ajoutent des PDF directement dans un canal.</div>',
     unsafe_allow_html=True,
 )
 st.info(
@@ -316,26 +331,29 @@ st.info(
 global_raw = uploader_dossiers("Dossiers de factures", key=f"global_{k}")
 st.markdown('</div>', unsafe_allow_html=True)
 
-with st.expander("Dépôt manuel par canal (si un PDF n'est pas reconnu automatiquement)"):
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("**📋 OCP** — récapitulatifs BO-OFFREM")
-        ocp_raw = st.file_uploader(
-            "PDF OCP", type=["pdf", "zip"], accept_multiple_files=True,
-            key=f"ocp_{k}", label_visibility="collapsed",
-        )
-    with col2:
-        st.markdown("**🏥 Alliance Healthcare** — factures grossiste")
-        alliance_raw = st.file_uploader(
-            "PDF Alliance", type=["pdf", "zip"], accept_multiple_files=True,
-            key=f"alliance_{k}", label_visibility="collapsed",
-        )
-    with col3:
-        st.markdown("**💊 Biogaran Direct** — factures (facture_*.pdf)")
-        biogaran_raw = st.file_uploader(
-            "PDF Biogaran", type=["pdf", "zip"], accept_multiple_files=True,
-            key=f"biogaran_{k}", label_visibility="collapsed",
-        )
+# Compteurs par canal, chacun avec son « ➕ » pour ajouter des PDF
+# directement dans ce canal (sans reconnaissance automatique) — utile pour
+# un PDF que la zone ci-dessus n'a pas reconnu. Les bulles sont remplies plus
+# bas, une fois tous les dépôts regroupés.
+m1, m2, m3, m4 = st.columns(4)
+bulles = {}
+manuels = {}
+for col, canal, titre in (
+    (m1, "ocp", "Récaps OCP"),
+    (m2, "alliance", "PDF Alliance"),
+    (m3, "biogaran", "Factures Biogaran"),
+):
+    with col:
+        bulles[canal] = st.empty()
+        with st.popover("➕", help=f"Ajouter des PDF dans « {titre} »", width="stretch"):
+            st.caption("PDF ou .zip ajoutés directement dans ce canal.")
+            manuels[canal] = st.file_uploader(
+                f"Ajouter {titre}", type=["pdf", "zip"], accept_multiple_files=True,
+                key=f"{canal}_{k}", label_visibility="collapsed",
+            )
+with m4:
+    bulles["ignores"] = st.empty()
+ocp_raw, alliance_raw, biogaran_raw = manuels["ocp"], manuels["alliance"], manuels["biogaran"]
 
 # Regroupement : dépôt global (canal détecté) + dépôts manuels (canal imposé),
 # dédoublonnage par contenu sur l'ensemble.
@@ -363,20 +381,20 @@ ocp_files = par_canal["ocp"]
 alliance_files = par_canal["alliance"]
 biogaran_files = par_canal["biogaran"]
 
+for cle, val, lbl in (
+    ("ocp", len(ocp_files), "📋 Récaps OCP"),
+    ("alliance", len(alliance_files), "🏥 PDF Alliance"),
+    ("biogaran", len(biogaran_files), "💊 Factures Biogaran"),
+    ("ignores", len(ignores), "Ignorés"),
+):
+    bulles[cle].markdown(f"""
+    <div class="kpi-box">
+        <div class="val">{val}</div>
+        <div class="lbl">{lbl}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
 if entrees:
-    m1, m2, m3, m4 = st.columns(4)
-    for col, val, lbl in (
-        (m1, len(ocp_files), "📋 Récaps OCP"),
-        (m2, len(alliance_files), "🏥 PDF Alliance"),
-        (m3, len(biogaran_files), "💊 Factures Biogaran"),
-        (m4, len(ignores), "Ignorés"),
-    ):
-        col.markdown(f"""
-        <div class="kpi-box">
-            <div class="val">{val}</div>
-            <div class="lbl">{lbl}</div>
-        </div>
-        """, unsafe_allow_html=True)
     if doublons:
         st.caption(f"🔁 {doublons} doublon(s) détecté(s) et ignoré(s) (fichier identique déjà déposé).")
     if ignores:
