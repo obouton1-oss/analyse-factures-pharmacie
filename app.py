@@ -247,7 +247,8 @@ def _normaliser(texte):
 
 
 def detecter_canal(contenu):
-    """Canal du PDF : "ocp" (récap BO-OFFREM), "alliance", "biogaran",
+    """Canal du PDF : "ocp" (récap BO-OFFREM), "biosim_ocp" (relevé OCP des
+    achats de biosimilaires), "alliance", "biogaran",
     "avoir_biogaran" (avoir RDP, non pris en compte), ou None s'il n'est pas
     reconnu (facture OCP individuelle, EMAC, autre fournisseur, PDF
     illisible...)."""
@@ -258,6 +259,8 @@ def detecter_canal(contenu):
             t = _normaliser(pdf.pages[0].extract_text() or "")
     except Exception:
         return None
+    if "PRODUITS BIOSIMILAIRES" in t and "BIOST" in t:
+        return "biosim_ocp"   # relevé OCP « Achats des produits BIOSIMILAIRES »
     if "BO-OFFREM" in t:
         return "ocp"
     if "ALLIANCE HEALTHCARE" in t:
@@ -317,7 +320,7 @@ st.markdown("### 📂 Dépôt des factures — tous canaux, tous mois")
 st.markdown(
     '<div class="sub">Clique sur <b>Upload directories</b> et choisis le dossier qui contient tous tes '
     'dossiers mensuels (par ex. « Factures 2026 ») : tous les sous-dossiers sont lus d\'un coup. '
-    'Chaque PDF est reconnu automatiquement (OCP, Alliance ou Biogaran Direct) d\'après son contenu, '
+    'Chaque PDF est reconnu automatiquement (récap OCP, relevé OCP des biosimilaires, Alliance ou Biogaran Direct) d\'après son contenu, '
     'peu importe le dossier où il est rangé. Le bouton <b>+</b> permet ensuite d\'ajouter un autre dossier ; '
     'les <b>+</b> sous les compteurs ajoutent des PDF directement dans un canal.</div>',
     unsafe_allow_html=True,
@@ -346,7 +349,9 @@ for col, canal, titre in (
     with col:
         bulles[canal] = st.empty()
         with st.popover("➕", help=f"Ajouter des PDF dans « {titre} »", width="stretch"):
-            st.caption("PDF ou .zip ajoutés directement dans ce canal.")
+            st.caption("PDF ou .zip ajoutés directement dans ce canal."
+                       + (" Le relevé OCP des biosimilaires peut aussi être ajouté ici."
+                          if canal == "ocp" else ""))
             manuels[canal] = st.file_uploader(
                 f"Ajouter {titre}", type=["pdf", "zip"], accept_multiple_files=True,
                 key=f"{canal}_{k}", label_visibility="collapsed",
@@ -358,10 +363,14 @@ ocp_raw, alliance_raw, biogaran_raw = manuels["ocp"], manuels["alliance"], manue
 # Regroupement : dépôt global (canal détecté) + dépôts manuels (canal imposé),
 # dédoublonnage par contenu sur l'ensemble.
 entrees = classer_automatiquement(avec_empreinte(deplier_fichiers(global_raw)))
-for raw, canal in ((ocp_raw, "ocp"), (alliance_raw, "alliance"), (biogaran_raw, "biogaran")):
+# Ajout manuel OCP : le relevé biosimilaires y est reconnu et mis à part,
+# tout le reste est traité comme récap BO-OFFREM.
+entrees += [(nom, c, e, "biosim_ocp" if canal == "biosim_ocp" else "ocp")
+            for nom, c, e, canal in classer_automatiquement(avec_empreinte(deplier_fichiers(ocp_raw)))]
+for raw, canal in ((alliance_raw, "alliance"), (biogaran_raw, "biogaran")):
     entrees += [(nom, c, e, canal) for nom, c, e in avec_empreinte(deplier_fichiers(raw))]
 
-par_canal = {"ocp": [], "alliance": [], "biogaran": []}
+par_canal = {"ocp": [], "biosim_ocp": [], "alliance": [], "biogaran": []}
 ignores = []   # (nom, raison)
 vus = set()
 doublons = 0
@@ -380,6 +389,7 @@ for nom, contenu, empreinte, canal in entrees:
 ocp_files = par_canal["ocp"]
 alliance_files = par_canal["alliance"]
 biogaran_files = par_canal["biogaran"]
+biosim_files = par_canal["biosim_ocp"]
 
 for cle, val, lbl in (
     ("ocp", len(ocp_files), "📋 Récaps OCP"),
@@ -395,6 +405,10 @@ for cle, val, lbl in (
     """, unsafe_allow_html=True)
 
 if entrees:
+    if biosim_files:
+        st.caption(f"📈 {len(biosim_files)} relevé(s) OCP des biosimilaires reconnu(s) — onglet "
+                   "« Biosimilaires OCP » ; seul le plus récent de chaque année est utilisé "
+                   "(chaque relevé reprend le cumul depuis janvier).")
     if doublons:
         st.caption(f"🔁 {doublons} doublon(s) détecté(s) et ignoré(s) (fichier identique déjà déposé).")
     if ignores:
@@ -411,7 +425,7 @@ if bcol2.button("🔄 Nouvelle analyse", use_container_width=True):
     nouvelle_analyse()
     st.rerun()
 
-total_fichiers = len(ocp_files) + len(alliance_files) + len(biogaran_files)
+total_fichiers = len(ocp_files) + len(alliance_files) + len(biogaran_files) + len(biosim_files)
 
 
 # ---------------------------------------------------------------------------
@@ -461,6 +475,7 @@ if generer:
                 ocp_paths = sauver(ocp_files, "ocp")
                 alliance_paths = sauver(alliance_files, "alliance")
                 biogaran_paths = sauver(biogaran_files, "biogaran_direct")
+                biosim_paths = sauver(biosim_files, "biosimilaires_ocp")
 
                 out_path = tmp_dir / "rapport_pharmacie.xlsx"
                 data_dir = str(ROOT / "data")
@@ -471,6 +486,7 @@ if generer:
                         ocp_paths, data_dir, str(out_path),
                         biogaran_direct_pdfs=biogaran_paths or None,
                         alliance_pdfs=alliance_paths or None,
+                        biosimilaires_ocp_pdfs=biosim_paths or None,
                     )
 
                 log_text = log_buffer.getvalue()

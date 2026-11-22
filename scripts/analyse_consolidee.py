@@ -1271,11 +1271,15 @@ def build_sheet_methodologie(wb):
         "'Non remboursé (ou non renseigné)' regroupe les deux cas faute de pouvoir les "
         "distinguer de façon fiable avec ces seuls fichiers.",
         "",
-        "CATÉGORIE NON DISPONIBLE : BIOSIMILAIRES",
-        "- Contrairement aux hybrides, les biosimilaires ne sont à ce stade PAS "
-        "distingués (aucune source équivalente au registre hybrides n'a encore été "
-        "intégrée). Ils tombent actuellement dans 'Hors répertoire'. À investiguer si "
-        "besoin — l'ANSM publie une liste de référence des biosimilaires.",
+        "BIOSIMILAIRES",
+        "- Dans les onglets issus des factures, les biosimilaires ne sont pas distingués : "
+        "ils tombent dans 'Hors répertoire'.",
+        "- Onglet 'Biosimilaires OCP' (si le relevé OCP « Achats des produits "
+        "BIOSIMILAIRES » est fourni) : CA net par molécule, laboratoire et trimestre, "
+        "biosimilaires et bioréférents, tous achats OCP avec ou sans offre. Seul le relevé "
+        "le plus récent de chaque année est retenu (cumul annuel, périmètre de molécules "
+        "élargi rétroactivement par OCP). Contrôlé à chaque lecture contre les totaux "
+        "imprimés du relevé. Non additionné aux autres onglets.",
         "",
         "CALCUL DU CA REMISÉ (hypothèse à confirmer)",
         "- CA remisé = CA PPHT − Remise HT. C'est l'hypothèse de calcul retenue pour "
@@ -1350,8 +1354,184 @@ def build_sheet_methodologie(wb):
     return ws
 
 
-def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, alliance_pdfs=None):
+# ---------------------------------------------------------------------------
+# Biosimilaires — relevé OCP « Achats des produits BIOSIMILAIRES » (BIOST)
+# ---------------------------------------------------------------------------
+def charger_releves_biosimilaires(pdf_paths):
+    """Lit les relevés BIOST et ne garde, pour chaque année, que le PLUS
+    RÉCENT : chaque relevé est un cumul depuis janvier qui reprend le détail
+    trimestre par trimestre, et OCP y ajoute en cours d'année des molécules
+    rétroactivement (constaté en 2026 : dénosumab, follitropine alfa,
+    ranibizumab absents du relevé T1, présents sur T1 dans le relevé T3).
+    Additionner plusieurs relevés compterait donc deux fois les mêmes achats."""
+    from parser_biosimilaires_ocp import parse_releve_biosimilaires
+    par_annee = {}
+    for chemin in pdf_paths or []:
+        r = parse_releve_biosimilaires(chemin)
+        r["fichier"] = Path(chemin).name
+        if not r["annee"]:
+            print(f"  ⚠️  Relevé biosimilaires illisible (année introuvable) : {r['fichier']}",
+                  file=sys.stderr)
+            continue
+        cle = (r["mois_fin"] or 0, r["edition"] or "")
+        garde = par_annee.get(r["annee"])
+        if garde is None or cle > (garde["mois_fin"] or 0, garde["edition"] or ""):
+            if garde is not None:
+                print(f"  Relevé biosimilaires {garde['fichier']} remplacé par le plus récent "
+                      f"{r['fichier']} (cumul annuel)")
+            par_annee[r["annee"]] = r
+        else:
+            print(f"  Relevé biosimilaires {r['fichier']} ignoré : un relevé plus récent "
+                  f"de {r['annee']} est fourni ({garde['fichier']})")
+    releves = [par_annee[a] for a in sorted(par_annee)]
+    for r in releves:
+        for c in r["controles"]:
+            print(f"  ⚠️  Biosimilaires {r['fichier']} : {c}", file=sys.stderr)
+    return releves
+
+
+def build_sheet_biosimilaires_ocp(wb, releves):
+    """Onglet « Biosimilaires OCP » : synthèse par molécule (biosimilaire /
+    bioréférent, part biosimilaire), par laboratoire, puis détail produit x
+    trimestre. Synthèses en formules SUMIFS sur le détail du même onglet."""
+    if not releves:
+        return
+    lignes = []
+    for r in releves:
+        lignes.extend(r["lignes"])
+    trimestres = sorted({l["trimestre"] for l in lignes})
+    molecules = sorted({l["molecule"] for l in lignes})
+    labos = sorted({l["laboratoire"] for l in lignes})
+
+    ws = wb.create_sheet("Biosimilaires OCP")
+    ws["A1"] = "Biosimilaires et bioréférents achetés chez OCP"
+    ws["A1"].font = TITLE_FONT
+    sources = " ; ".join(
+        f"{r['fichier']} (cumul janvier → mois {r['mois_fin']:02d}/{r['annee']}, édité le {r['edition']})"
+        for r in releves)
+    ws["A2"] = ("Source : relevé OCP « Achats des produits BIOSIMILAIRES » — " + sources + ". "
+                "CA net = CA PPHT − remise. Ce relevé couvre tous les achats OCP de ces produits, "
+                "avec ou sans offre : la plupart ne figurent pas dans le BO-OFFREM. Ces montants "
+                "ne sont PAS additionnés aux autres onglets.")
+    ws["A2"].font = SUBTITLE_FONT
+    ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
+    ws.row_dimensions[2].height = 42
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=4 + 2 * len(trimestres))
+
+    # Emplacement du détail (en bas de l'onglet) : connu à l'avance pour les formules
+    n_mol, n_lab = len(molecules), len(labos)
+    row_mol_header = 5
+    row_lab_title = row_mol_header + n_mol + 4
+    row_lab_header = row_lab_title + 1
+    row_det_title = row_lab_header + n_lab + 4
+    row_det_header = row_det_title + 1
+    first_det = row_det_header + 1
+    last_det = first_det + len(lignes) - 1
+
+    def rng(col):
+        return f"${col}${first_det}:${col}${last_det}"
+    # Colonnes du détail : A Molécule, B Statut, C Laboratoire, D Désignation,
+    # E CIP13, F Trimestre, G Qté, H CA PGHT, I CA net
+    R_MOL, R_STAT, R_LAB, R_TRIM, R_QTE, R_CA = rng("A"), rng("B"), rng("C"), rng("F"), rng("G"), rng("I")
+
+    # --- 1. Par molécule -------------------------------------------------
+    ws.cell(row=row_mol_header - 1, column=1, value="1. Par molécule — CA net (€)").font = BOLD_FONT
+    headers = (["Molécule"] + [f"Biosimilaire {t}" for t in trimestres]
+               + ["Biosimilaire total", "Bioréférent total", "Total", "Part biosimilaire"])
+    for i, h in enumerate(headers, start=1):
+        ws.cell(row=row_mol_header, column=i, value=h)
+    style_header_row(ws, row_mol_header, len(headers))
+    ws.row_dimensions[row_mol_header].height = 32
+    nT = len(trimestres)
+    for k, mol in enumerate(molecules):
+        row = row_mol_header + 1 + k
+        ws.cell(row=row, column=1, value=mol)
+        for j, t in enumerate(trimestres):
+            ws.cell(row=row, column=2 + j,
+                    value=f'=SUMIFS({R_CA},{R_MOL},$A{row},{R_STAT},"Biosimilaire",{R_TRIM},"{t}")')
+        c_bs, c_br, c_tot, c_part = 2 + nT, 3 + nT, 4 + nT, 5 + nT
+        ws.cell(row=row, column=c_bs, value=f'=SUMIFS({R_CA},{R_MOL},$A{row},{R_STAT},"Biosimilaire")')
+        ws.cell(row=row, column=c_br, value=f'=SUMIFS({R_CA},{R_MOL},$A{row},{R_STAT},"Bioréférent")')
+        L_bs, L_br, L_tot = (get_column_letter(c) for c in (c_bs, c_br, c_tot))
+        ws.cell(row=row, column=c_tot, value=f"={L_bs}{row}+{L_br}{row}")
+        ws.cell(row=row, column=c_part, value=f"=IFERROR({L_bs}{row}/{L_tot}{row},0)")
+    tot_row = row_mol_header + 1 + n_mol
+    ws.cell(row=tot_row, column=1, value="TOTAL")
+    for c in range(2, 5 + nT):
+        L = get_column_letter(c)
+        ws.cell(row=tot_row, column=c, value=f"=SUM({L}{row_mol_header + 1}:{L}{tot_row - 1})")
+    L_bs, L_tot = get_column_letter(2 + nT), get_column_letter(4 + nT)
+    ws.cell(row=tot_row, column=5 + nT, value=f"=IFERROR({L_bs}{tot_row}/{L_tot}{tot_row},0)")
+    for row in range(row_mol_header + 1, tot_row + 1):
+        for c in range(1, len(headers) + 1):
+            cell = ws.cell(row=row, column=c)
+            cell.font = BOLD_FONT if row == tot_row else NORMAL_FONT
+            cell.border = THIN_BORDER
+            if row == tot_row:
+                cell.fill = TOTAL_FILL
+            if 2 <= c <= 4 + nT:
+                cell.number_format = EUR_FMT
+            elif c == 5 + nT:
+                cell.number_format = PCT_FMT
+
+    # --- 2. Par laboratoire ---------------------------------------------
+    ws.cell(row=row_lab_title, column=1, value="2. Par laboratoire (fabricant selon OCP) — CA net (€)").font = BOLD_FONT
+    headers_l = ["Laboratoire"] + list(trimestres) + ["Total", "dont biosimilaire", "Qté"]
+    for i, h in enumerate(headers_l, start=1):
+        ws.cell(row=row_lab_header, column=i, value=h)
+    style_header_row(ws, row_lab_header, len(headers_l))
+    for k, lab in enumerate(labos):
+        row = row_lab_header + 1 + k
+        ws.cell(row=row, column=1, value=lab)
+        for j, t in enumerate(trimestres):
+            ws.cell(row=row, column=2 + j, value=f'=SUMIFS({R_CA},{R_LAB},$A{row},{R_TRIM},"{t}")')
+        ws.cell(row=row, column=2 + nT, value=f'=SUMIFS({R_CA},{R_LAB},$A{row})')
+        ws.cell(row=row, column=3 + nT, value=f'=SUMIFS({R_CA},{R_LAB},$A{row},{R_STAT},"Biosimilaire")')
+        ws.cell(row=row, column=4 + nT, value=f'=SUMIFS({R_QTE},{R_LAB},$A{row})')
+    tot_l = row_lab_header + 1 + n_lab
+    ws.cell(row=tot_l, column=1, value="TOTAL")
+    for c in range(2, 5 + nT):
+        L = get_column_letter(c)
+        ws.cell(row=tot_l, column=c, value=f"=SUM({L}{row_lab_header + 1}:{L}{tot_l - 1})")
+    for row in range(row_lab_header + 1, tot_l + 1):
+        for c in range(1, len(headers_l) + 1):
+            cell = ws.cell(row=row, column=c)
+            cell.font = BOLD_FONT if row == tot_l else NORMAL_FONT
+            cell.border = THIN_BORDER
+            if row == tot_l:
+                cell.fill = TOTAL_FILL
+            if 2 <= c <= 3 + nT:
+                cell.number_format = EUR_FMT
+
+    # --- 3. Détail produit x trimestre ------------------------------------
+    ws.cell(row=row_det_title, column=1, value="3. Détail par produit et par trimestre").font = BOLD_FONT
+    headers_d = ["Molécule", "Statut", "Laboratoire", "Désignation", "CIP13", "Trimestre",
+                 "Qté", "CA PGHT (€)", "CA net (€)"]
+    for i, h in enumerate(headers_d, start=1):
+        ws.cell(row=row_det_header, column=i, value=h)
+    style_header_row(ws, row_det_header, len(headers_d))
+    for k, l in enumerate(sorted(lignes, key=lambda x: (x["molecule"], x["statut"], x["designation"], x["trimestre"]))):
+        row = first_det + k
+        vals = [l["molecule"], l["statut"], l["laboratoire"], l["designation"], l["cip13"],
+                l["trimestre"], l["qte"], l["ca_pght"], l["ca_net"]]
+        for c, v in enumerate(vals, start=1):
+            cell = ws.cell(row=row, column=c, value=v)
+            cell.font = NORMAL_FONT
+            if c in (8, 9):
+                cell.number_format = EUR_FMT
+    tab = Table(displayName="BiosimilairesOCP", ref=f"A{row_det_header}:I{last_det}")
+    tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
+    ws.add_table(tab)
+
+    autosize(ws, {"A": 24, "B": 14, "C": 26, "D": 34, "E": 15, "F": 12, "G": 12,
+                  "H": 13, "I": 13, **{get_column_letter(c): 14 for c in range(10, 6 + nT + 1)}})
+    ws.freeze_panes = "B4"
+
+
+def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, alliance_pdfs=None,
+                 biosimilaires_ocp_pdfs=None):
     bdpm = BDPM(data_dir)
+    releves_biosim = charger_releves_biosimilaires(biosimilaires_ocp_pdfs)
     all_rows = enrich_rows(pdf_paths, bdpm, biogaran_direct_pdfs=biogaran_direct_pdfs, alliance_pdfs=alliance_pdfs)
     catalog_biogaran = compute_biogaran_catalog(all_rows)
     fuite_rows = compute_fuite(all_rows, catalog_biogaran)
@@ -1366,12 +1546,18 @@ def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, allia
     )
     labo_fills = build_labo_fill_map(genericqueurs)
 
-    _, n_detail = build_sheet_detail(wb, all_rows)
-    build_sheet_genericqueur(wb, n_detail, labo_fills, genericqueurs)
-    build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills)
-    build_sheet_assiette_remise(wb, all_rows, n_detail)
-    _, n_fuite = build_sheet_fuite(wb, all_rows, catalog_biogaran)
-    build_sheet_resume(wb, all_rows, n_fuite)
+    if all_rows:
+        _, n_detail = build_sheet_detail(wb, all_rows)
+        build_sheet_genericqueur(wb, n_detail, labo_fills, genericqueurs)
+        build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills)
+        build_sheet_assiette_remise(wb, all_rows, n_detail)
+        _, n_fuite = build_sheet_fuite(wb, all_rows, catalog_biogaran)
+        build_sheet_resume(wb, all_rows, n_fuite)
+    else:
+        # Seul un relevé biosimilaires a été fourni : pas de facture, donc pas
+        # d'onglets de CA / fuite (ils ne contiendraient que des divisions par 0).
+        print("  Aucune facture fournie : seuls les onglets biosimilaires et méthodologie sont produits.")
+    build_sheet_biosimilaires_ocp(wb, releves_biosim)
     build_sheet_methodologie(wb)
 
     wb.save(out_path)
@@ -1428,6 +1614,9 @@ if __name__ == "__main__":
                      help="Un ou plusieurs PDF de factures Biogaran Direct (canal Biogaran Direct)")
     ap.add_argument("--alliance", nargs="*", default=None,
                      help="Un ou plusieurs PDF de factures Alliance Healthcare (canal Alliance)")
+    ap.add_argument("--biosimilaires-ocp", nargs="*", default=None,
+                     help="Relevé(s) OCP « Achats des produits BIOSIMILAIRES » (BIOST)")
     args = ap.parse_args()
     build_report(args.pdfs, args.data, args.out,
-                  biogaran_direct_pdfs=args.biogaran_direct, alliance_pdfs=args.alliance)
+                  biogaran_direct_pdfs=args.biogaran_direct, alliance_pdfs=args.alliance,
+                  biosimilaires_ocp_pdfs=args.biosimilaires_ocp)
