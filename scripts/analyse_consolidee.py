@@ -272,6 +272,18 @@ def _enrichir_ligne(r, periode, canal, bdpm, brand, is_gen):
             m_grp = re.search(r"\(([^)]*)\)\s*$", detail_exclu)
             groupe_libelle = (m_grp.group(1) if m_grp else "") + \
                 " [classement forcé : BDPM pas encore à jour]"
+    remboursement = nat["remboursement"]
+    if (remboursement == "Non remboursé (ou non renseigné)"
+            and repertoire == "Générique (répertoire)" and r.get("tva") == 2.1):
+        # Taux absent de la BDPM pour cette présentation : on reprend celui du
+        # groupe générique s'il est unique, mais seulement si la ligne est
+        # facturée à 2,1 % (TVA des médicaments remboursables). Les deux
+        # conditions ensemble évitent de déclarer remboursé un produit vendu
+        # sans ordonnance (ex. IBUPROFENE ARROW 200 mg, TVA 10 %, dont le
+        # groupe compte des présentations remboursées).
+        taux_grp = bdpm.taux_groupe_generique(r["cip13"])
+        if taux_grp:
+            remboursement = f"{taux_grp} (déduit du groupe générique)"
     return {
         **r,
         "periode": periode,
@@ -281,7 +293,7 @@ def _enrichir_ligne(r, periode, canal, bdpm, brand, is_gen):
         "repertoire": repertoire,
         "type_medicament": type_medicament(repertoire),
         "repertoire_force": repertoire_force,
-        "remboursement": nat["remboursement"],
+        "remboursement": remboursement,
         "hybride_role": hyb.get("role") or "",
         "groupe_id": groupe_id,
         "groupe_libelle": groupe_libelle,
@@ -347,10 +359,10 @@ def enrich_rows_biogaran_direct(pdf_paths, bdpm):
 
 
 def lire_factures_direct_labo(pdf_paths, bdpm):
-    """Canal « <labo> Direct » (EG LABO pour l'instant, cf. parser_direct_labo.py).
-    Renvoie (lignes enrichies, avoirs de remise additionnelle). Le génériqueur
-    est le laboratoire émetteur ; type de médicament et remboursement viennent
-    de la BDPM comme pour les autres canaux."""
+    """Canaux « <labo> Direct » (EG LABO, SANDOZ — cf. parser_direct_labo.py).
+    Renvoie (lignes enrichies, avoirs). Les avoirs sont ignorés pour l'instant
+    (liste toujours vide). Le génériqueur est le laboratoire émetteur ; type de
+    médicament et remboursement viennent de la BDPM comme pour les autres canaux."""
     from parser_direct_labo import extraire_facture_direct_labo
     rows, avoirs, vues = [], [], {}
     for pdf_path in pdf_paths or []:
@@ -371,48 +383,15 @@ def lire_factures_direct_labo(pdf_paths, bdpm):
             continue
         if f["num_facture"]:
             vues[f["num_facture"]] = nom
-        for a in f["avoirs"]:
-            avoirs.append({**a, "laboratoire": f["laboratoire"], "num_facture": f["num_facture"],
-                           "date_facture": f["date_facture"], "fichier": nom})
+        if f["type_document"] == "avoir_remise":
+            # Avoirs de remise additionnelle : ignorés pour l'instant (décision
+            # pharmacien du 22/11/2026), comme les avoirs Sandoz.
+            print(f"  Avoir {f['laboratoire']} {f['num_facture']} ({nom}) ignoré")
+            continue
         periode = periode_depuis_date_facture(f["date_facture"])
         for r in f["lignes"]:
             rows.append(_enrichir_ligne(r, periode, f["canal"], bdpm, f["laboratoire"], True))
-    if avoirs:
-        print(f"  Avoirs de remise additionnelle (directs labos) : {len(avoirs)} ligne(s), "
-              f"{sum(a['montant_ht'] for a in avoirs):,.2f} € HT — onglet « Avoirs directs labos »")
     return rows, avoirs
-
-
-def build_sheet_avoirs_direct(wb, avoirs):
-    """Liste des avoirs de remise additionnelle reçus en direct des labos
-    (pas des achats : non intégrés au CA des autres onglets)."""
-    if not avoirs:
-        return
-    ws = wb.create_sheet("Avoirs directs labos")
-    ws["A1"] = "Avoirs de remise additionnelle reçus en direct des laboratoires"
-    ws["A1"].font = TITLE_FONT
-    ws["A2"] = ("Montants HT tels qu'imprimés sur les avoirs (négatifs). Ce ne sont pas des "
-                "achats : ils ne sont pas déduits du CA des autres onglets.")
-    ws["A2"].font = SUBTITLE_FONT
-    headers = ["Laboratoire", "N° avoir", "Date", "Mois concerné", "Code", "Libellé", "Montant HT (€)"]
-    for i, h in enumerate(headers, start=1):
-        ws.cell(row=4, column=i, value=h)
-    style_header_row(ws, 4, len(headers))
-    tri = sorted(avoirs, key=lambda a: (a["laboratoire"], a["date_facture"][6:] + a["date_facture"][3:5]
-                                         + a["date_facture"][:2], a["code"]))
-    for k, a in enumerate(tri):
-        row = 5 + k
-        for c, v in enumerate([a["laboratoire"], a["num_facture"], a["date_facture"],
-                               a["mois_concerne"], a["code"], a["libelle"], a["montant_ht"]], start=1):
-            cell = ws.cell(row=row, column=c, value=v)
-            cell.font = NORMAL_FONT
-            cell.border = THIN_BORDER
-        ws.cell(row=row, column=7).number_format = EUR_FMT
-    tot = 5 + len(tri)
-    ws.cell(row=tot, column=1, value="TOTAL").font = BOLD_FONT
-    c = ws.cell(row=tot, column=7, value=f"=SUM(G5:G{tot - 1})")
-    c.number_format, c.font, c.fill = EUR_FMT, BOLD_FONT, TOTAL_FILL
-    autosize(ws, {"A": 16, "B": 14, "C": 12, "D": 14, "E": 10, "F": 36, "G": 15})
 
 
 # Certaines lignes Alliance n'ont aucun mot-clé de marque dans leur
@@ -1337,6 +1316,9 @@ def build_sheet_methodologie(wb):
         "au répertoire des génériques) — il ressort comme catégorie 'Hybride' distincte "
         "dans ce rapport plutôt que noyé dans 'Hors répertoire'.",
         "- Remboursement : taux issu de CIS_CIP_bdpm.txt (colonne officielle). "
+        "Si la BDPM ne donne aucun taux pour un générique du répertoire facturé à 2,1 % de TVA, "
+        "le taux commun du groupe générique est repris, avec la mention « déduit du groupe "
+        "générique » (cas constaté : CLOPIDOGREL EG 75 mg B/30). "
         "'Non remboursé (ou non renseigné)' regroupe les deux cas faute de pouvoir les "
         "distinguer de façon fiable avec ces seuls fichiers.",
         "",
@@ -1348,8 +1330,7 @@ def build_sheet_methodologie(wb):
         "- SANDOZ : factures Sandoz (canal « Sandoz Direct »), contrôlées au centime. Sandoz "
         "n'imprime pas le PFHT (« NaN ») : CA PPHT = montant net facturé, remise non connue. "
         "Les avoirs Sandoz (conditions commerciales) ne sont pas pris en compte.",
-        "- Avoirs de « remise additionnelle » (ventes grossistes / ventes directes) : listés dans "
-        "l'onglet 'Avoirs directs labos', non déduits du CA.",
+        "- Avoirs EG (« remise additionnelle ») et avoirs Sandoz : ignorés pour l'instant.",
         "",
         "BIOSIMILAIRES",
         "- Dans les onglets issus des factures, les biosimilaires ne sont pas distingués : "
@@ -1659,7 +1640,7 @@ def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, allia
     bdpm = BDPM(data_dir)
     releves_biosim = charger_releves_biosimilaires(biosimilaires_ocp_pdfs)
     all_rows = enrich_rows(pdf_paths, bdpm, biogaran_direct_pdfs=biogaran_direct_pdfs, alliance_pdfs=alliance_pdfs)
-    rows_direct, avoirs_direct = lire_factures_direct_labo(direct_labo_pdfs, bdpm)
+    rows_direct, _ = lire_factures_direct_labo(direct_labo_pdfs, bdpm)
     all_rows.extend(rows_direct)
     catalog_biogaran = compute_biogaran_catalog(all_rows)
     fuite_rows = compute_fuite(all_rows, catalog_biogaran)
@@ -1685,7 +1666,6 @@ def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, allia
         # Seul un relevé biosimilaires a été fourni : pas de facture, donc pas
         # d'onglets de CA / fuite (ils ne contiendraient que des divisions par 0).
         print("  Aucune facture fournie : seuls les onglets biosimilaires et méthodologie sont produits.")
-    build_sheet_avoirs_direct(wb, avoirs_direct)
     build_sheet_biosimilaires_ocp(wb, releves_biosim,
                                   biosimilaires_des_factures_directes(releves_biosim, all_rows))
     build_sheet_methodologie(wb)

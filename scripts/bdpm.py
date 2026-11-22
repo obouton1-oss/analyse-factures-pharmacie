@@ -94,6 +94,27 @@ class BDPM:
                 self.cip13_to_cis[cip13] = cis
                 self.cip13_to_taux_remb[cip13] = taux_remb.strip() or None
 
+    def taux_groupe_generique(self, cip13):
+        """Taux de remboursement commun aux AUTRES présentations du groupe
+        générique du CIP (princeps + génériques), s'il est unique ; sinon None.
+        Sert à combler un taux absent de CIS_CIP pour une présentation donnée
+        (cas constaté : CLOPIDOGREL EG LABO 75 mg B/30, 3400930127117)."""
+        cis = self.cip13_to_cis.get(cip13)
+        groupe = self.cis_to_groupe.get(cis)
+        if not groupe:
+            return None
+        if not hasattr(self, "_cis_to_cips"):
+            self._cis_to_cips = {}
+            for cip, c in self.cip13_to_cis.items():
+                self._cis_to_cips.setdefault(c, []).append(cip)
+        taux = set()
+        for c in self.groupe_to_cis.get(groupe, ()):
+            for cip in self._cis_to_cips.get(c, ()):
+                t = self.cip13_to_taux_remb.get(cip)
+                if cip != cip13 and t:
+                    taux.add(t.replace(" ", ""))
+        return taux.pop() if len(taux) == 1 else None
+
     def _load_cis(self, path):
         with open(path, encoding="latin-1") as f:
             for line in f:
