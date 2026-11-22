@@ -65,7 +65,12 @@ OFFRE_TO_GENERIQUEUR = {
     "ZENTIVA non remise": ("ZENTIVA", True),
     "SA NR ZENTIVA SORBITOL RSF": ("ZENTIVA", True),
     "OASE NR ACCORD HEALTHCARE RSF": ("ACCORD HEALTHCARE", True),
+    "ACCORD HEALTHCARE Génériques RSF": ("ACCORD HEALTHCARE", True),
     "OASE ZYDUS RSF": ("ZYDUS", True),
+    "ZYDUS Génériques RSF": ("ZYDUS", True),
+    "VENIPHARM Génériques RSF": ("VENIPHARM", True),
+    "OASE NR VIATRIS RSF": ("VIATRIS", True),
+    "SA NR ZENTIVA RSF": ("ZENTIVA", True),
     "CRISTERS Génériques RSF": ("CRISTERS", True),
     "KRKA Génériques RSF": ("KRKA", True),
     # Offres biosimilaires : gardées comme génériqueur (True) pour ne pas
@@ -87,6 +92,16 @@ OFFRE_TO_GENERIQUEUR = {
     "SIGVARIS DYNAVEN CIBLEE 56% RSF": ("SIGVARIS (dispositifs)", False),
     "COLOPLAST Offre Ciblée 30-15% RSF": ("COLOPLAST (dispositifs)", False),
     "COLOPLAST Offre Ciblée 30% RSF": ("COLOPLAST (dispositifs)", False),
+    "COLOPLAST Offre Ciblée 23-10% RSF": ("COLOPLAST (dispositifs)", False),
+    # Offres "OASE" non génériqueurs (observées sur les BO-OFFREM 2026).
+    # Avant le 21/11/2026, elles étaient rattachées à tort à ACCORD HEALTHCARE
+    # (cf. classify_offre).
+    "OASE DAYANG RSF": ("DAYANG (parapharmacie)", False),
+    "OASE ESSITY TENA RSF": ("ESSITY (dispositifs)", False),
+    "OASE EVABIOTE RSF": ("EVABIOTE (parapharmacie)", False),
+    "OASE LNS DELICAL 2026 RSF": ("DELICAL (nutrition)", False),
+    "OASE THUASNE RSF": ("THUASNE (dispositifs)", False),
+    "OFFRE DROVELIS RSF": ("DROVELIS (princeps)", False),
 }
 
 # ---------------------------------------------------------------------------
@@ -146,13 +161,31 @@ MOIS_FR = {
 
 
 def classify_offre(offre_name):
+    """Offre BO-OFFREM -> (marque, est_génériqueur).
+
+    1. Correspondance exacte dans OFFRE_TO_GENERIQUEUR.
+    2. Sinon, recherche du NOM DE LABORATOIRE en mot entier dans le libellé
+       de l'offre (ex. une future "TEVA Génériques 2027 RSF" -> TEVA). Le plus
+       long nom trouvé l'emporte.
+    3. Sinon "À CLASSIFIER" (signalé dans le journal du rapport).
+
+    L'ancienne règle comparait le DÉBUT du libellé au début d'une offre
+    connue : "OASE NR ACCORD HEALTHCARE RSF" donnait le préfixe "OASE", si
+    bien que toutes les offres "OASE ..." (Thuasne, Dayang, Delical...)
+    partaient chez ACCORD HEALTHCARE, et "ACCORD HEALTHCARE Génériques RSF"
+    restait non classée. Corrigé le 21/11/2026."""
     if offre_name in OFFRE_TO_GENERIQUEUR:
         return OFFRE_TO_GENERIQUEUR[offre_name]
     upper = (offre_name or "").upper()
-    for known_offre, (brand, is_gen) in OFFRE_TO_GENERIQUEUR.items():
-        prefix = known_offre.split(" Gén")[0].split(" non")[0].split(" NR")[0].split(" RSF")[0]
-        if upper.startswith(prefix.upper()):
-            return (brand, is_gen)
+    candidats = {}
+    for brand, is_gen in OFFRE_TO_GENERIQUEUR.values():
+        if brand.startswith("__") or "(" in brand and is_gen:
+            continue  # clés virtuelles, biosimilaires : correspondance exacte seulement
+        nom = brand.split(" (")[0].upper()
+        if re.search(r"(?<![A-Z0-9])" + re.escape(nom) + r"(?![A-Z0-9])", upper):
+            candidats.setdefault(nom, (brand, is_gen))
+    if candidats:
+        return candidats[max(candidats, key=len)]
     return ("À CLASSIFIER", None)
 
 
