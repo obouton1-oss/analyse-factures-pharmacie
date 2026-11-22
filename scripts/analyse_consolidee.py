@@ -346,6 +346,70 @@ def enrich_rows_biogaran_direct(pdf_paths, bdpm):
     return all_rows
 
 
+def lire_factures_direct_labo(pdf_paths, bdpm):
+    """Canal « <labo> Direct » (EG LABO pour l'instant, cf. parser_direct_labo.py).
+    Renvoie (lignes enrichies, avoirs de remise additionnelle). Le génériqueur
+    est le laboratoire émetteur ; type de médicament et remboursement viennent
+    de la BDPM comme pour les autres canaux."""
+    from parser_direct_labo import extraire_facture_direct_labo
+    rows, avoirs, vues = [], [], {}
+    for pdf_path in pdf_paths or []:
+        nom = os.path.basename(pdf_path)
+        f = extraire_facture_direct_labo(pdf_path)
+        for c in f["controles"]:
+            print(f"⚠️  {nom} : {c}", file=sys.stderr)
+        if f["type_document"] == "inconnu":
+            continue
+        if f["num_facture"] and f["num_facture"] in vues:
+            print(f"⚠️  Facture {f['num_facture']} ({nom}) déjà comptée via {vues[f['num_facture']]} "
+                  "— doublon ignoré", file=sys.stderr)
+            continue
+        if f["num_facture"]:
+            vues[f["num_facture"]] = nom
+        for a in f["avoirs"]:
+            avoirs.append({**a, "laboratoire": f["laboratoire"], "num_facture": f["num_facture"],
+                           "date_facture": f["date_facture"], "fichier": nom})
+        periode = periode_depuis_date_facture(f["date_facture"])
+        for r in f["lignes"]:
+            rows.append(_enrichir_ligne(r, periode, f["canal"], bdpm, f["laboratoire"], True))
+    if avoirs:
+        print(f"  Avoirs de remise additionnelle (directs labos) : {len(avoirs)} ligne(s), "
+              f"{sum(a['montant_ht'] for a in avoirs):,.2f} € HT — onglet « Avoirs directs labos »")
+    return rows, avoirs
+
+
+def build_sheet_avoirs_direct(wb, avoirs):
+    """Liste des avoirs de remise additionnelle reçus en direct des labos
+    (pas des achats : non intégrés au CA des autres onglets)."""
+    if not avoirs:
+        return
+    ws = wb.create_sheet("Avoirs directs labos")
+    ws["A1"] = "Avoirs de remise additionnelle reçus en direct des laboratoires"
+    ws["A1"].font = TITLE_FONT
+    ws["A2"] = ("Montants HT tels qu'imprimés sur les avoirs (négatifs). Ce ne sont pas des "
+                "achats : ils ne sont pas déduits du CA des autres onglets.")
+    ws["A2"].font = SUBTITLE_FONT
+    headers = ["Laboratoire", "N° avoir", "Date", "Mois concerné", "Code", "Libellé", "Montant HT (€)"]
+    for i, h in enumerate(headers, start=1):
+        ws.cell(row=4, column=i, value=h)
+    style_header_row(ws, 4, len(headers))
+    tri = sorted(avoirs, key=lambda a: (a["laboratoire"], a["date_facture"][6:] + a["date_facture"][3:5]
+                                         + a["date_facture"][:2], a["code"]))
+    for k, a in enumerate(tri):
+        row = 5 + k
+        for c, v in enumerate([a["laboratoire"], a["num_facture"], a["date_facture"],
+                               a["mois_concerne"], a["code"], a["libelle"], a["montant_ht"]], start=1):
+            cell = ws.cell(row=row, column=c, value=v)
+            cell.font = NORMAL_FONT
+            cell.border = THIN_BORDER
+        ws.cell(row=row, column=7).number_format = EUR_FMT
+    tot = 5 + len(tri)
+    ws.cell(row=tot, column=1, value="TOTAL").font = BOLD_FONT
+    c = ws.cell(row=tot, column=7, value=f"=SUM(G5:G{tot - 1})")
+    c.number_format, c.font, c.fill = EUR_FMT, BOLD_FONT, TOTAL_FILL
+    autosize(ws, {"A": 16, "B": 14, "C": 12, "D": 14, "E": 10, "F": 36, "G": 15})
+
+
 # Certaines lignes Alliance n'ont aucun mot-clé de marque dans leur
 # désignation (ex. "BISOPROLOL REF CPR 1,25MG 30" pour un Biogaran vendu sans
 # suffixe de marque sur cette référence) : parser_alliance.py ne peut alors
@@ -1271,6 +1335,14 @@ def build_sheet_methodologie(wb):
         "'Non remboursé (ou non renseigné)' regroupe les deux cas faute de pouvoir les "
         "distinguer de façon fiable avec ces seuls fichiers.",
         "",
+        "FACTURES DIRECTES DES LABORATOIRES (hors Biogaran)",
+        "- EG LABO : factures émises par CSP / Movianto pour le compte d'EG (canal « EG Direct »), "
+        "contrôlées au centime sur le total net HT de chaque facture. Type de médicament "
+        "(répertoire, hors répertoire, hybride, princeps) et remboursement via la BDPM, comme "
+        "pour les autres canaux.",
+        "- Avoirs de « remise additionnelle » (ventes grossistes / ventes directes) : listés dans "
+        "l'onglet 'Avoirs directs labos', non déduits du CA.",
+        "",
         "BIOSIMILAIRES",
         "- Dans les onglets issus des factures, les biosimilaires ne sont pas distingués : "
         "ils tombent dans 'Hors répertoire'.",
@@ -1529,10 +1601,12 @@ def build_sheet_biosimilaires_ocp(wb, releves):
 
 
 def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, alliance_pdfs=None,
-                 biosimilaires_ocp_pdfs=None):
+                 biosimilaires_ocp_pdfs=None, direct_labo_pdfs=None):
     bdpm = BDPM(data_dir)
     releves_biosim = charger_releves_biosimilaires(biosimilaires_ocp_pdfs)
     all_rows = enrich_rows(pdf_paths, bdpm, biogaran_direct_pdfs=biogaran_direct_pdfs, alliance_pdfs=alliance_pdfs)
+    rows_direct, avoirs_direct = lire_factures_direct_labo(direct_labo_pdfs, bdpm)
+    all_rows.extend(rows_direct)
     catalog_biogaran = compute_biogaran_catalog(all_rows)
     fuite_rows = compute_fuite(all_rows, catalog_biogaran)
     periodes = sorted({r["periode"] for r in all_rows}, key=periode_sort_key)
@@ -1557,6 +1631,7 @@ def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, allia
         # Seul un relevé biosimilaires a été fourni : pas de facture, donc pas
         # d'onglets de CA / fuite (ils ne contiendraient que des divisions par 0).
         print("  Aucune facture fournie : seuls les onglets biosimilaires et méthodologie sont produits.")
+    build_sheet_avoirs_direct(wb, avoirs_direct)
     build_sheet_biosimilaires_ocp(wb, releves_biosim)
     build_sheet_methodologie(wb)
 
@@ -1616,7 +1691,9 @@ if __name__ == "__main__":
                      help="Un ou plusieurs PDF de factures Alliance Healthcare (canal Alliance)")
     ap.add_argument("--biosimilaires-ocp", nargs="*", default=None,
                      help="Relevé(s) OCP « Achats des produits BIOSIMILAIRES » (BIOST)")
+    ap.add_argument("--direct-labo", nargs="*", default=None,
+                     help="Factures et avoirs directs des laboratoires (EG LABO...)")
     args = ap.parse_args()
     build_report(args.pdfs, args.data, args.out,
                   biogaran_direct_pdfs=args.biogaran_direct, alliance_pdfs=args.alliance,
-                  biosimilaires_ocp_pdfs=args.biosimilaires_ocp)
+                  biosimilaires_ocp_pdfs=args.biosimilaires_ocp, direct_labo_pdfs=args.direct_labo)

@@ -248,7 +248,8 @@ def _normaliser(texte):
 
 def detecter_canal(contenu):
     """Canal du PDF : "ocp" (récap BO-OFFREM), "biosim_ocp" (relevé OCP des
-    achats de biosimilaires), "alliance", "biogaran",
+    achats de biosimilaires), "direct_labo" (factures directes EG LABO...),
+    "alliance", "biogaran",
     "avoir_biogaran" (avoir RDP, non pris en compte), ou None s'il n'est pas
     reconnu (facture OCP individuelle, EMAC, autre fournisseur, PDF
     illisible...)."""
@@ -265,6 +266,8 @@ def detecter_canal(contenu):
         return "ocp"
     if "ALLIANCE HEALTHCARE" in t:
         return "alliance"
+    if "POUR COMPTE DES LABORATOIRES EG LABO" in t or "DENOMINATION SOCIALE : EG LABO" in t:
+        return "direct_labo"  # factures et avoirs EG LABO en direct (CSP / Movianto)
     if "BIOGARAN" in t and "RECAPITULATIF DES REMISES" in t:
         return "avoir_biogaran"
     if ("BIOGARAN" in t and "AU NOM ET POUR LE COMPTE DE" in t) \
@@ -320,7 +323,7 @@ st.markdown("### 📂 Dépôt des factures — tous canaux, tous mois")
 st.markdown(
     '<div class="sub">Clique sur <b>Upload directories</b> et choisis le dossier qui contient tous tes '
     'dossiers mensuels (par ex. « Factures 2026 ») : tous les sous-dossiers sont lus d\'un coup. '
-    'Chaque PDF est reconnu automatiquement (récap OCP, relevé OCP des biosimilaires, Alliance ou Biogaran Direct) d\'après son contenu, '
+    'Chaque PDF est reconnu automatiquement (récap OCP, relevé OCP des biosimilaires, Alliance, Biogaran Direct ou facture directe EG) d\'après son contenu, '
     'peu importe le dossier où il est rangé. Le bouton <b>+</b> permet ensuite d\'ajouter un autre dossier ; '
     'les <b>+</b> sous les compteurs ajoutent des PDF directement dans un canal.</div>',
     unsafe_allow_html=True,
@@ -338,13 +341,14 @@ st.markdown('</div>', unsafe_allow_html=True)
 # directement dans ce canal (sans reconnaissance automatique) — utile pour
 # un PDF que la zone ci-dessus n'a pas reconnu. Les bulles sont remplies plus
 # bas, une fois tous les dépôts regroupés.
-m1, m2, m3, m4 = st.columns(4)
+m1, m2, m3, m4, m5 = st.columns(5)
 bulles = {}
 manuels = {}
 for col, canal, titre in (
     (m1, "ocp", "Récaps OCP"),
     (m2, "alliance", "PDF Alliance"),
     (m3, "biogaran", "Factures Biogaran"),
+    (m4, "direct_labo", "Directs labos"),
 ):
     with col:
         bulles[canal] = st.empty()
@@ -356,9 +360,10 @@ for col, canal, titre in (
                 f"Ajouter {titre}", type=["pdf", "zip"], accept_multiple_files=True,
                 key=f"{canal}_{k}", label_visibility="collapsed",
             )
-with m4:
+with m5:
     bulles["ignores"] = st.empty()
 ocp_raw, alliance_raw, biogaran_raw = manuels["ocp"], manuels["alliance"], manuels["biogaran"]
+direct_raw = manuels["direct_labo"]
 
 # Regroupement : dépôt global (canal détecté) + dépôts manuels (canal imposé),
 # dédoublonnage par contenu sur l'ensemble.
@@ -367,10 +372,10 @@ entrees = classer_automatiquement(avec_empreinte(deplier_fichiers(global_raw)))
 # tout le reste est traité comme récap BO-OFFREM.
 entrees += [(nom, c, e, "biosim_ocp" if canal == "biosim_ocp" else "ocp")
             for nom, c, e, canal in classer_automatiquement(avec_empreinte(deplier_fichiers(ocp_raw)))]
-for raw, canal in ((alliance_raw, "alliance"), (biogaran_raw, "biogaran")):
+for raw, canal in ((alliance_raw, "alliance"), (biogaran_raw, "biogaran"), (direct_raw, "direct_labo")):
     entrees += [(nom, c, e, canal) for nom, c, e in avec_empreinte(deplier_fichiers(raw))]
 
-par_canal = {"ocp": [], "biosim_ocp": [], "alliance": [], "biogaran": []}
+par_canal = {"ocp": [], "biosim_ocp": [], "alliance": [], "biogaran": [], "direct_labo": []}
 ignores = []   # (nom, raison)
 vus = set()
 doublons = 0
@@ -390,11 +395,13 @@ ocp_files = par_canal["ocp"]
 alliance_files = par_canal["alliance"]
 biogaran_files = par_canal["biogaran"]
 biosim_files = par_canal["biosim_ocp"]
+direct_files = par_canal["direct_labo"]
 
 for cle, val, lbl in (
     ("ocp", len(ocp_files), "📋 Récaps OCP"),
     ("alliance", len(alliance_files), "🏥 PDF Alliance"),
     ("biogaran", len(biogaran_files), "💊 Factures Biogaran"),
+    ("direct_labo", len(direct_files), "🏭 Directs labos (EG)"),
     ("ignores", len(ignores), "Ignorés"),
 ):
     bulles[cle].markdown(f"""
@@ -425,7 +432,8 @@ if bcol2.button("🔄 Nouvelle analyse", use_container_width=True):
     nouvelle_analyse()
     st.rerun()
 
-total_fichiers = len(ocp_files) + len(alliance_files) + len(biogaran_files) + len(biosim_files)
+total_fichiers = (len(ocp_files) + len(alliance_files) + len(biogaran_files) + len(biosim_files)
+                  + len(direct_files))
 
 
 # ---------------------------------------------------------------------------
@@ -476,6 +484,7 @@ if generer:
                 alliance_paths = sauver(alliance_files, "alliance")
                 biogaran_paths = sauver(biogaran_files, "biogaran_direct")
                 biosim_paths = sauver(biosim_files, "biosimilaires_ocp")
+                direct_paths = sauver(direct_files, "direct_labo")
 
                 out_path = tmp_dir / "rapport_pharmacie.xlsx"
                 data_dir = str(ROOT / "data")
@@ -487,6 +496,7 @@ if generer:
                         biogaran_direct_pdfs=biogaran_paths or None,
                         alliance_pdfs=alliance_paths or None,
                         biosimilaires_ocp_pdfs=biosim_paths or None,
+                        direct_labo_pdfs=direct_paths or None,
                     )
 
                 log_text = log_buffer.getvalue()
