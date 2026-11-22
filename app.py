@@ -248,7 +248,7 @@ def _normaliser(texte):
 
 def detecter_canal(contenu):
     """Canal du PDF : "ocp" (récap BO-OFFREM), "biosim_ocp" (relevé OCP des
-    achats de biosimilaires), "direct_labo" (factures directes EG LABO...),
+    achats de biosimilaires), "direct_labo" (factures directes EG LABO, SANDOZ),
     "alliance", "biogaran",
     "avoir_biogaran" (avoir RDP, non pris en compte), ou None s'il n'est pas
     reconnu (facture OCP individuelle, EMAC, autre fournisseur, PDF
@@ -266,8 +266,9 @@ def detecter_canal(contenu):
         return "ocp"
     if "ALLIANCE HEALTHCARE" in t:
         return "alliance"
-    if "POUR COMPTE DES LABORATOIRES EG LABO" in t or "DENOMINATION SOCIALE : EG LABO" in t:
-        return "direct_labo"  # factures et avoirs EG LABO en direct (CSP / Movianto)
+    if ("POUR COMPTE DES LABORATOIRES EG LABO" in t or "DENOMINATION SOCIALE : EG LABO" in t
+            or "DENOMINATION SOCIALE : SANDOZ" in t):
+        return "direct_labo"  # factures et avoirs EG LABO / SANDOZ en direct
     if "BIOGARAN" in t and "RECAPITULATIF DES REMISES" in t:
         return "avoir_biogaran"
     if ("BIOGARAN" in t and "AU NOM ET POUR LE COMPTE DE" in t) \
@@ -323,7 +324,7 @@ st.markdown("### 📂 Dépôt des factures — tous canaux, tous mois")
 st.markdown(
     '<div class="sub">Clique sur <b>Upload directories</b> et choisis le dossier qui contient tous tes '
     'dossiers mensuels (par ex. « Factures 2026 ») : tous les sous-dossiers sont lus d\'un coup. '
-    'Chaque PDF est reconnu automatiquement (récap OCP, relevé OCP des biosimilaires, Alliance, Biogaran Direct ou facture directe EG) d\'après son contenu, '
+    'Chaque PDF est reconnu automatiquement (récap OCP, relevé OCP des biosimilaires, Alliance, Biogaran Direct, factures directes EG ou Sandoz) d\'après son contenu, '
     'peu importe le dossier où il est rangé. Le bouton <b>+</b> permet ensuite d\'ajouter un autre dossier ; '
     'les <b>+</b> sous les compteurs ajoutent des PDF directement dans un canal.</div>',
     unsafe_allow_html=True,
@@ -401,7 +402,7 @@ for cle, val, lbl in (
     ("ocp", len(ocp_files), "📋 Récaps OCP"),
     ("alliance", len(alliance_files), "🏥 PDF Alliance"),
     ("biogaran", len(biogaran_files), "💊 Factures Biogaran"),
-    ("direct_labo", len(direct_files), "🏭 Directs labos (EG)"),
+    ("direct_labo", len(direct_files), "🏭 Directs labos (EG, Sandoz)"),
     ("ignores", len(ignores), "Ignorés"),
 ):
     bulles[cle].markdown(f"""
@@ -414,7 +415,7 @@ for cle, val, lbl in (
 if entrees:
     if biosim_files:
         st.caption(f"📈 {len(biosim_files)} relevé(s) OCP des biosimilaires reconnu(s) — onglet "
-                   "« Biosimilaires OCP » ; seul le plus récent de chaque année est utilisé "
+                   "« Biosimilaires » ; seul le plus récent de chaque année est utilisé "
                    "(chaque relevé reprend le cumul depuis janvier).")
     if doublons:
         st.caption(f"🔁 {doublons} doublon(s) détecté(s) et ignoré(s) (fichier identique déjà déposé).")

@@ -360,6 +360,11 @@ def lire_factures_direct_labo(pdf_paths, bdpm):
             print(f"⚠️  {nom} : {c}", file=sys.stderr)
         if f["type_document"] == "inconnu":
             continue
+        if f["type_document"] == "avoir_ignore":
+            print(f"  Avoir {f['laboratoire']} {f['num_facture']} ({nom}) ignoré")
+            continue
+        if f.get("pfht_non_communique"):
+            print(f"  ℹ️  {nom} : PFHT non communiqué par {f['laboratoire']} — CA = montant net facturé")
         if f["num_facture"] and f["num_facture"] in vues:
             print(f"⚠️  Facture {f['num_facture']} ({nom}) déjà comptée via {vues[f['num_facture']]} "
                   "— doublon ignoré", file=sys.stderr)
@@ -1340,13 +1345,18 @@ def build_sheet_methodologie(wb):
         "contrôlées au centime sur le total net HT de chaque facture. Type de médicament "
         "(répertoire, hors répertoire, hybride, princeps) et remboursement via la BDPM, comme "
         "pour les autres canaux.",
+        "- SANDOZ : factures Sandoz (canal « Sandoz Direct »), contrôlées au centime. Sandoz "
+        "n'imprime pas le PFHT (« NaN ») : CA PPHT = montant net facturé, remise non connue. "
+        "Les avoirs Sandoz (conditions commerciales) ne sont pas pris en compte.",
         "- Avoirs de « remise additionnelle » (ventes grossistes / ventes directes) : listés dans "
         "l'onglet 'Avoirs directs labos', non déduits du CA.",
         "",
         "BIOSIMILAIRES",
         "- Dans les onglets issus des factures, les biosimilaires ne sont pas distingués : "
         "ils tombent dans 'Hors répertoire'.",
-        "- Onglet 'Biosimilaires OCP' (si le relevé OCP « Achats des produits "
+        "- Onglet 'Biosimilaires' : achats directs de biosimilaires (Sandoz...) identifiés par "
+        "leur marque dans le relevé OCP, ajoutés au relevé OCP (colonne Source).",
+        "- Relevé OCP (si le relevé OCP « Achats des produits "
         "BIOSIMILAIRES » est fourni) : CA net par molécule, laboratoire et trimestre, "
         "biosimilaires et bioréférents, tous achats OCP avec ou sans offre. Seul le relevé "
         "le plus récent de chaque année est retenu (cumul annuel, périmètre de molécules "
@@ -1462,32 +1472,76 @@ def charger_releves_biosimilaires(pdf_paths):
     return releves
 
 
-def build_sheet_biosimilaires_ocp(wb, releves):
-    """Onglet « Biosimilaires OCP » : synthèse par molécule (biosimilaire /
+def _marque(designation):
+    m = re.match(r"[A-Z]+", (designation or "").upper())
+    return m.group(0) if m else ""
+
+
+def biosimilaires_des_factures_directes(releves, all_rows):
+    """Lignes des factures directes (canaux « ... Direct » hors Biogaran) qui
+    sont des biosimilaires / bioréférents. Identification par la MARQUE (1er
+    mot de la désignation : HYRIMOZ, ZIEXTENZO...) rapprochée des produits du
+    relevé OCP, qui donne molécule, statut et laboratoire. Sans relevé OCP, pas
+    de référentiel : rien n'est identifié (signalé)."""
+    ref = {}
+    for r in releves:
+        for l in r["lignes"]:
+            ref.setdefault(_marque(l["designation"]), l)
+    directs = [r for r in all_rows
+               if r.get("canal", "").endswith(" Direct") and r["canal"] != "Biogaran Direct"]
+    res = []
+    for r in directs:
+        l = ref.get(_marque(r["libelle"]))
+        if not l:
+            continue
+        mm, aaaa = r["periode"].split("/") if "/" in r["periode"] else ("0", "0")
+        res.append({
+            "molecule": l["molecule"], "statut": l["statut"], "laboratoire": l["laboratoire"],
+            "designation": r["libelle"], "cip13": r["cip13"],
+            "trimestre": f"{aaaa} T{(int(mm) - 1) // 3 + 1}",
+            "qte": r["qte_fact"], "ca_pght": None, "ca_net": round(r["ca_ppht"] - r["remise_ht"], 2),
+            "source": r["canal"],
+        })
+    if directs and not ref:
+        print("  ⚠️  Factures directes fournies sans relevé OCP des biosimilaires : les "
+              "biosimilaires achetés en direct ne peuvent pas être identifiés.", file=sys.stderr)
+    return res
+
+
+def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
+    """Onglet « Biosimilaires » : synthèse par molécule (biosimilaire /
     bioréférent, part biosimilaire), par laboratoire, puis détail produit x
-    trimestre. Synthèses en formules SUMIFS sur le détail du même onglet."""
-    if not releves:
+    trimestre. Sources : relevé OCP (achats OCP) + factures directes des
+    laboratoires. Synthèses en formules SUMIFS sur le détail du même onglet."""
+    lignes_directes = lignes_directes or []
+    if not releves and not lignes_directes:
         return
     lignes = []
     for r in releves:
-        lignes.extend(r["lignes"])
+        lignes.extend({**l, "source": "Relevé OCP"} for l in r["lignes"])
+    lignes.extend(lignes_directes)
     trimestres = sorted({l["trimestre"] for l in lignes})
     molecules = sorted({l["molecule"] for l in lignes})
     labos = sorted({l["laboratoire"] for l in lignes})
 
-    ws = wb.create_sheet("Biosimilaires OCP")
-    ws["A1"] = "Biosimilaires et bioréférents achetés chez OCP"
+    ws = wb.create_sheet("Biosimilaires")
+    ws["A1"] = "Biosimilaires et bioréférents — achats OCP et achats directs"
     ws["A1"].font = TITLE_FONT
     sources = " ; ".join(
         f"{r['fichier']} (cumul janvier → mois {r['mois_fin']:02d}/{r['annee']}, édité le {r['edition']})"
-        for r in releves)
-    ws["A2"] = ("Source : relevé OCP « Achats des produits BIOSIMILAIRES » — " + sources + ". "
-                "CA net = CA PPHT − remise. Ce relevé couvre tous les achats OCP de ces produits, "
-                "avec ou sans offre : la plupart ne figurent pas dans le BO-OFFREM. Ces montants "
-                "ne sont PAS additionnés aux autres onglets.")
+        for r in releves) or "aucun relevé fourni"
+    canaux_directs = sorted({l["source"] for l in lignes_directes})
+    ws["A2"] = ("Sources : relevé OCP « Achats des produits BIOSIMILAIRES » — " + sources + ". "
+                + (f"Factures directes ({', '.join(canaux_directs)}) : montant net facturé, "
+                   "trimestre de la date de facture, produit identifié par sa marque dans le relevé OCP. "
+                   if canaux_directs else "")
+                + "CA net = CA PPHT − remise. Le relevé OCP couvre tous les achats OCP de ces produits, "
+                "avec ou sans offre (la plupart ne figurent pas dans le BO-OFFREM) ; ses montants ne sont "
+                "PAS additionnés aux autres onglets. Les achats directs, eux, figurent aussi dans "
+                "'Détail lignes'. Colonne « Source » du détail pour filtrer.")
     ws["A2"].font = SUBTITLE_FONT
     ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
-    ws.row_dimensions[2].height = 42
+    ws.row_dimensions[2].height = 58
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=4 + 2 * len(trimestres))
 
     # Emplacement du détail (en bas de l'onglet) : connu à l'avance pour les formules
@@ -1547,7 +1601,7 @@ def build_sheet_biosimilaires_ocp(wb, releves):
                 cell.number_format = PCT_FMT
 
     # --- 2. Par laboratoire ---------------------------------------------
-    ws.cell(row=row_lab_title, column=1, value="2. Par laboratoire (fabricant selon OCP) — CA net (€)").font = BOLD_FONT
+    ws.cell(row=row_lab_title, column=1, value="2. Par laboratoire — CA net (€)").font = BOLD_FONT
     headers_l = ["Laboratoire"] + list(trimestres) + ["Total", "dont biosimilaire", "Qté"]
     for i, h in enumerate(headers_l, start=1):
         ws.cell(row=row_lab_header, column=i, value=h)
@@ -1578,25 +1632,25 @@ def build_sheet_biosimilaires_ocp(wb, releves):
     # --- 3. Détail produit x trimestre ------------------------------------
     ws.cell(row=row_det_title, column=1, value="3. Détail par produit et par trimestre").font = BOLD_FONT
     headers_d = ["Molécule", "Statut", "Laboratoire", "Désignation", "CIP13", "Trimestre",
-                 "Qté", "CA PGHT (€)", "CA net (€)"]
+                 "Qté", "CA PGHT (€)", "CA net (€)", "Source"]
     for i, h in enumerate(headers_d, start=1):
         ws.cell(row=row_det_header, column=i, value=h)
     style_header_row(ws, row_det_header, len(headers_d))
     for k, l in enumerate(sorted(lignes, key=lambda x: (x["molecule"], x["statut"], x["designation"], x["trimestre"]))):
         row = first_det + k
         vals = [l["molecule"], l["statut"], l["laboratoire"], l["designation"], l["cip13"],
-                l["trimestre"], l["qte"], l["ca_pght"], l["ca_net"]]
+                l["trimestre"], l["qte"], l["ca_pght"], l["ca_net"], l["source"]]
         for c, v in enumerate(vals, start=1):
             cell = ws.cell(row=row, column=c, value=v)
             cell.font = NORMAL_FONT
             if c in (8, 9):
                 cell.number_format = EUR_FMT
-    tab = Table(displayName="BiosimilairesOCP", ref=f"A{row_det_header}:I{last_det}")
+    tab = Table(displayName="Biosimilaires", ref=f"A{row_det_header}:J{last_det}")
     tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
     ws.add_table(tab)
 
     autosize(ws, {"A": 24, "B": 14, "C": 26, "D": 34, "E": 15, "F": 12, "G": 12,
-                  "H": 13, "I": 13, **{get_column_letter(c): 14 for c in range(10, 6 + nT + 1)}})
+                  "H": 13, "I": 13, "J": 15, **{get_column_letter(c): 14 for c in range(11, 6 + nT + 1)}})
     ws.freeze_panes = "B4"
 
 
@@ -1632,7 +1686,8 @@ def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, allia
         # d'onglets de CA / fuite (ils ne contiendraient que des divisions par 0).
         print("  Aucune facture fournie : seuls les onglets biosimilaires et méthodologie sont produits.")
     build_sheet_avoirs_direct(wb, avoirs_direct)
-    build_sheet_biosimilaires_ocp(wb, releves_biosim)
+    build_sheet_biosimilaires_ocp(wb, releves_biosim,
+                                  biosimilaires_des_factures_directes(releves_biosim, all_rows))
     build_sheet_methodologie(wb)
 
     wb.save(out_path)

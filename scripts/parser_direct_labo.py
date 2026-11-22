@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 Parser des factures « directes » des laboratoires génériqueurs autres que
-Biogaran (EG LABO pour l'instant ; Teva, Sandoz... à ajouter quand leurs
-factures seront fournies).
+Biogaran : EG LABO et SANDOZ (Teva... à ajouter quand leurs factures seront
+fournies).
 
 Les factures EG sont émises par le même prestataire que celles de Biogaran
 (Centre Spécialités Pharmaceutiques, puis Movianto) « pour ordre et pour
@@ -30,7 +30,84 @@ from parser_biogaran_direct import LIGNE_PRODUIT, to_float, _extraire_format_mov
 LABORATOIRES = [
     ((r"POUR COMPTE DES LABORATOIRES EG LABO", r"D[ée]nomination sociale\s*:\s*EG LABO"),
      "EG LABO", "EG Direct"),
+    ((r"D[ée]nomination sociale\s*:\s*SANDOZ\b",), "SANDOZ", "Sandoz Direct"),
 ]
+
+# Format Sandoz (plateforme Cegedim, différent de Movianto) :
+#   <désignation, parfois sur 2 lignes>
+#   <N°> <Qté> PCE <PFHT|NaN> EUR [<remise> EUR] <prix net> EUR <montant net> EUR <TVA>%
+#   Code Article : <CIP13>
+#   N° de lot : <lot>
+# Sandoz n'imprime pas le PFHT (« NaN ») : seul le net est connu, et le
+# « Montant Total PFHT » imprimé est égal au net. Les avoirs (« Avoir n° »,
+# conditions commerciales sur CIP fictif 3400999999999) sont ignorés.
+LIGNE_SANDOZ_RE = re.compile(
+    r"^(?P<num>\d+)\s+(?P<qte>-?\d+)\s+(?P<unite>[A-Z]{2,4})\s+(?P<montants>(?:(?:NaN|-?[\d ]+,\d+)\s+EUR\s+)+)"
+    r"(?P<tva>[\d,]+)\s*%$")
+MONTANT_EUR_RE = re.compile(r"(NaN|-?[\d ]+,\d+)\s+EUR")
+CIP_SANDOZ_RE = re.compile(r"^Code Article\s*:\s*(\d{13})")
+TYPE_SANDOZ_RE = re.compile(r"^(Facture|Avoir)\s+(\d+)\s*$", re.M)
+DATE_SANDOZ_RE = re.compile(r"Date de facturation\s*:\s*(\d{2}/\d{2}/\d{4})")
+TOTAL_SANDOZ_RE = re.compile(r"Montant Total net H\.?T\.?\s+(-?[\d ]+,\d+)\s+EUR")
+
+
+def _num_fr(x):
+    return float(x.replace(" ", "").replace(",", "."))
+
+
+def _extraire_format_sandoz(texte, res):
+    mt = TYPE_SANDOZ_RE.search(texte)
+    md = DATE_SANDOZ_RE.search(texte)
+    res["num_facture"] = mt.group(2) if mt else ""
+    res["date_facture"] = md.group(1) if md else ""
+    mtot = TOTAL_SANDOZ_RE.search(texte)
+    res["total_net_ht"] = _num_fr(mtot.group(1)) if mtot else None
+    if mt and mt.group(1) == "Avoir":
+        res["type_document"] = "avoir_ignore"
+        return []
+    res["type_document"] = "facture"
+    lignes_txt = texte.split("\n")
+    debut = next((i for i, l in enumerate(lignes_txt) if l.startswith("CIP 13")), 0) + 1
+    lignes, tampon = [], []
+    i = debut
+    while i < len(lignes_txt):
+        l = lignes_txt[i].strip()
+        m = LIGNE_SANDOZ_RE.match(l)
+        if m:
+            montants = MONTANT_EUR_RE.findall(m.group("montants"))
+            qte = int(m.group("qte"))
+            pfht = None if montants[0] == "NaN" else _num_fr(montants[0])
+            prix_net = _num_fr(montants[-2])
+            montant_net = _num_fr(montants[-1])
+            cip = ""
+            for j in range(i + 1, min(i + 4, len(lignes_txt))):
+                mc = CIP_SANDOZ_RE.match(lignes_txt[j].strip())
+                if mc:
+                    cip = mc.group(1)
+                    break
+            ca_ppht = round(qte * pfht, 2) if pfht is not None else montant_net
+            lignes.append({
+                "cip13": cip,
+                "libelle": re.sub(r"\s+", " ", " ".join(tampon)).strip(),
+                "tva": _num_fr(m.group("tva")),
+                "qte_cdee": qte, "qte_fact": qte,
+                "ppht_unit": pfht if pfht is not None else prix_net,
+                "prix_net_unitaire": prix_net,
+                "ca_ppht": ca_ppht,
+                "ca_pght": montant_net,
+                "taux_remise": round((1 - montant_net / ca_ppht) * 100, 2) if ca_ppht else 0.0,
+                "remise_ht": round(ca_ppht - montant_net, 2),
+                "pfht_non_communique": pfht is None,
+            })
+            tampon = []
+        elif l.startswith(("Code Article", "N° de lot", "Montant Total")):
+            tampon = []
+            if l.startswith("Montant Total"):
+                break
+        elif l:
+            tampon.append(l)
+        i += 1
+    return lignes
 
 NUM_DATE_CSP_RE = re.compile(r"(?P<date>\d{2}/\d{2}/\d{4})\s+(?P<num>[A-Z]\d{9})\b")
 TOTAL_QTES_RE = re.compile(r"TOTAL QTES FACTUREES\s+(-?\d+)")
@@ -53,7 +130,7 @@ def identifier_laboratoire(texte):
 def extraire_facture_direct_labo(path_pdf):
     """Renvoie un dict :
       laboratoire, canal, num_facture, date_facture, type_document
-      ("facture" | "avoir_remise" | "inconnu"), lignes (format commun aux autres
+      ("facture" | "avoir_remise" | "avoir_ignore" | "inconnu"), lignes (format commun aux autres
       parsers), avoirs [{code, libelle, montant_ht, mois_concerne}],
       total_net_ht (imprimé ou reconstitué du pied de facture), controles."""
     with pdfplumber.open(path_pdf) as pdf:
@@ -67,7 +144,13 @@ def extraire_facture_direct_labo(path_pdf):
         res["controles"].append("laboratoire émetteur non reconnu")
         return res
 
-    if "Code Article" in texte and "Prix brut" in texte:
+    if labo == "SANDOZ":
+        lignes = _extraire_format_sandoz(texte, res)
+        if res["type_document"] == "avoir_ignore":
+            return res
+        if any(l.get("pfht_non_communique") for l in lignes):
+            res["pfht_non_communique"] = True
+    elif "Code Article" in texte and "Prix brut" in texte:
         # Format Movianto : même mise en page que Biogaran
         f = _extraire_format_movianto(texte)
         res.update(num_facture=f["num_facture"], date_facture=f["date_facture"],
