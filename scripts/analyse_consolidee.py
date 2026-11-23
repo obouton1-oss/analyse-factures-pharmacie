@@ -1801,6 +1801,11 @@ def build_sheet_methodologie(wb):
         "générique » (cas constaté : CLOPIDOGREL EG 75 mg B/30). "
         "'Non remboursé (ou non renseigné)' regroupe les deux cas faute de pouvoir les "
         "distinguer de façon fiable avec ces seuls fichiers.",
+        "- Remboursement restreint : une présentation dont la BDPM réserve la prise en charge "
+        "à « certains assurés sociaux de Guyane » (atovaquone/proguanil, Malarone, Lariam, "
+        "Doxypalu) est traitée comme non remboursée, ainsi que tout son groupe générique "
+        "(la mention manque sur ATOVAQUONE/PROGUANIL BIOGARAN). Elle sort donc de l'assiette "
+        "EG et du rattrapage Teva (bdpm.py : REMBOURSEMENT_RESTREINT_MOTIFS).",
         "",
         "FACTURES DIRECTES DES LABORATOIRES (hors Biogaran)",
         "- EG LABO : factures émises par CSP / Movianto pour le compte d'EG (canal « EG Direct »), "

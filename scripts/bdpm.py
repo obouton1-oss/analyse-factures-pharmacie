@@ -62,11 +62,22 @@ def _normalise(titulaire: str) -> str:
     return NORMALISATION_TITULAIRE.get(t.upper(), t)
 
 
+# Présentations dont la BDPM indique un taux de remboursement mais dont la prise
+# en charge est réservée à une population hors officine de métropole : traitées
+# comme NON remboursées (décision pharmacien du 23/11/2026, cas de
+# l'atovaquone/proguanil : remboursé uniquement en prévention du paludisme pour
+# certains assurés sociaux de Guyane ; même mention sur Malarone, Lariam,
+# Doxypalu). Repérage par le texte « indications ouvrant droit au
+# remboursement » de CIS_CIP (13e colonne).
+REMBOURSEMENT_RESTREINT_MOTIFS = ("assurés sociaux de Guyane",)
+
+
 class BDPM:
     def __init__(self, data_dir):
         data_dir = Path(data_dir)
         self.cip13_to_cis = {}
         self.cip13_to_taux_remb = {}
+        self.cip13_remb_restreint = set()  # CIP traités comme non remboursés
         self.cis_to_titulaire = {}
         self.cis_to_denomination = {}
         self.cis_to_type_generique = {}  # 0=princeps, 1/2/4=générique
@@ -83,6 +94,7 @@ class BDPM:
         self._load_cis(data_dir / "CIS_bdpm.txt")
         self._load_cis_gener(data_dir / "CIS_GENER_bdpm.txt")
         self._load_hybrides(data_dir / "fic02grp.txt", data_dir / "fic03spe.txt")
+        self._propager_restrictions()
         self._biogaran_groupes = self._compute_biogaran_groupes()
 
     def _load_cis_cip(self, path):
@@ -93,7 +105,25 @@ class BDPM:
                     continue
                 cis, cip13, taux_remb = cols[0], cols[6], cols[8]
                 self.cip13_to_cis[cip13] = cis
+                indications = cols[12] if len(cols) > 12 else ""
+                if taux_remb.strip() and any(m in indications for m in REMBOURSEMENT_RESTREINT_MOTIFS):
+                    self.cip13_remb_restreint.add(cip13)
+                    taux_remb = ""
                 self.cip13_to_taux_remb[cip13] = taux_remb.strip() or None
+
+    def _propager_restrictions(self):
+        """La mention de remboursement restreint manque sur certaines
+        présentations d'un même groupe générique (constaté : ATOVAQUONE/PROGUANIL
+        BIOGARAN, 65 % sans mention, alors que princeps et autres génériques la
+        portent). Le groupe entier est donc traité comme non remboursé."""
+        groupes = {self.cis_to_groupe.get(self.cip13_to_cis.get(c)) for c in self.cip13_remb_restreint}
+        groupes.discard(None)
+        if not groupes:
+            return
+        for cip, cis in self.cip13_to_cis.items():
+            if self.cis_to_groupe.get(cis) in groupes and self.cip13_to_taux_remb.get(cip):
+                self.cip13_remb_restreint.add(cip)
+                self.cip13_to_taux_remb[cip] = None
 
     def denomination(self, cip13):
         """Dénomination BDPM de la spécialité (ex. « CALCIUM VITAMINE D3 EG
