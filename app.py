@@ -71,17 +71,27 @@ st.markdown(f"""
     }}
     .canal-card h3 {{ margin-top: 0; font-size: 1.05rem; }}
     .canal-card .sub {{ color: #6B7280; font-size: 0.85rem; margin-bottom: 0.6rem; }}
+    /* Cadre de la zone de dépôt (st.container key="depot_global") */
+    .st-key-depot_global {{
+        border-top: 5px solid {NAVY_LIGHT} !important;
+        border-radius: 10px !important;
+        padding: 0.4rem 0.4rem 0.2rem 0.4rem;
+    }}
+    .st-key-depot_global h3 {{ margin-top: 0; }}
+    .st-key-depot_global .sub {{ opacity: 0.8; font-size: 0.9rem; margin-bottom: 0.6rem; }}
 
+    /* Compteurs : fond bleu translucide et texte hérité, lisibles en thème
+       clair comme en thème sombre (pas de fond blanc fixe). */
     .kpi-box {{
-        background: white;
-        border: 1px solid #E5E7EB;
+        background: rgba(46, 83, 149, 0.10);
+        border: 1px solid rgba(128, 128, 128, 0.30);
+        border-top: 3px solid {NAVY_LIGHT};
         border-radius: 10px;
         padding: 0.9rem 1rem;
         text-align: center;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
     }}
-    .kpi-box .val {{ font-size: 1.5rem; font-weight: 700; color: {NAVY}; }}
-    .kpi-box .lbl {{ font-size: 0.8rem; color: #6B7280; margin-top: 0.2rem; }}
+    .kpi-box .val {{ font-size: 1.5rem; font-weight: 700; color: #4A78C2; }}
+    .kpi-box .lbl {{ font-size: 0.8rem; opacity: 0.75; margin-top: 0.2rem; }}
 
     div[data-testid="stFileUploader"] section {{
         border-radius: 8px;
@@ -391,24 +401,29 @@ Pour un rapport complet sur une période, fournir **tous** les documents de la p
 # ---------------------------------------------------------------------------
 # Dépôt global : un ou plusieurs dossiers, tri automatique par canal
 # ---------------------------------------------------------------------------
-st.markdown('<div class="canal-card" style="--accent:#1F3864">', unsafe_allow_html=True)
-st.markdown("### 📂 Dépôt des factures — tous canaux, tous mois")
-st.markdown(
-    '<div class="sub">Clique sur <b>Upload directories</b> et choisis le dossier qui contient tous tes '
-    'dossiers mensuels (par ex. « Factures 2026 ») : tous les sous-dossiers sont lus d\'un coup. '
-    'Chaque PDF est reconnu automatiquement (récap OCP, relevé OCP des biosimilaires, Alliance, Biogaran Direct, factures directes EG, Sandoz ou Teva) d\'après son contenu, '
-    'peu importe le dossier où il est rangé. Le bouton <b>+</b> permet ensuite d\'ajouter un autre dossier ; '
-    'les <b>+</b> sous les compteurs ajoutent des PDF directement dans un canal.</div>',
-    unsafe_allow_html=True,
-)
-st.info(
-    "⚠️ Les factures OCP individuelles (plus d'un millier par an, ~200 Mo) et les EMAC "
-    "ne servent pas au rapport : si elles se trouvent dans le dossier choisi, elles sont "
-    "envoyées puis ignorées, ce qui rallonge nettement l'envoi. Mieux vaut les ranger "
-    "dans un dossier à part avant le dépôt."
-)
-global_raw = uploader_dossiers("Dossiers de factures", key=f"global_{k}")
-st.markdown('</div>', unsafe_allow_html=True)
+# Cadre de la zone de dépôt : conteneur Streamlit natif (le fond suit le thème
+# clair ou sombre du navigateur). Un <div> ouvert dans un st.markdown et fermé
+# dans un autre ne fonctionne pas : Streamlit le referme aussitôt, ce qui
+# affichait un bandeau blanc vide.
+depot = st.container(border=True, key="depot_global")
+with depot:
+    st.markdown("### 📂 Dépôt des factures — tous canaux, tous mois")
+    st.markdown(
+        '<div class="sub">Clique sur <b>Upload directories</b> et choisis le dossier qui contient tous tes '
+        'dossiers mensuels (par ex. « Factures 2026 ») : tous les sous-dossiers sont lus d\'un coup. '
+        'Chaque PDF est reconnu automatiquement (récap OCP, relevé OCP des biosimilaires, Alliance, '
+        'Biogaran Direct, factures directes EG, Sandoz ou Teva) d\'après son contenu, '
+        'peu importe le dossier où il est rangé. Le bouton <b>+</b> permet ensuite d\'ajouter un autre dossier ; '
+        'les <b>+</b> sous les compteurs ajoutent des PDF directement dans un canal.</div>',
+        unsafe_allow_html=True,
+    )
+    st.info(
+        "⚠️ Les factures OCP individuelles (plus d'un millier par an, ~200 Mo) et les EMAC "
+        "ne servent pas au rapport : si elles se trouvent dans le dossier choisi, elles sont "
+        "envoyées puis ignorées, ce qui rallonge nettement l'envoi. Mieux vaut les ranger "
+        "dans un dossier à part avant le dépôt."
+    )
+    global_raw = uploader_dossiers("Dossiers de factures", key=f"global_{k}")
 
 # Compteurs par canal, chacun avec son « ➕ » pour ajouter des PDF
 # directement dans ce canal (sans reconnaissance automatique) — utile pour
