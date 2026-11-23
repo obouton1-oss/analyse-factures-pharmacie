@@ -788,10 +788,10 @@ CANAUX_BIOGARAN_DETAIL = ["OCP", "Alliance", "Biogaran Direct"]
 # elle n'est PAS ajoutée au TOTAL GÉNÉRAL (déjà incluse dans la ligne Total).
 LIGNE_EXCLUSIONS_REPERTOIRE = "dont exclusions répertoire"
 EXCL_FONT_COLOR = "9C5700"
-# Ligne suivante : assiette de remise = Total − exclusions (même calcul que
+# Ligne suivante : assiette de remise = Total − non remboursés − exclusions (même calcul que
 # la colonne « Assiette retenue » de l'onglet Assiette remise Biogaran).
 # Ligne de lecture, elle non plus n'entre pas dans le TOTAL GÉNÉRAL.
-LIGNE_ASSIETTE_REMISE = "Assiette remise (Total − exclusions)"
+LIGNE_ASSIETTE_REMISE = "Assiette remise (Total − non remb. − exclusions)"
 ASSIETTE_FONT_COLOR = "1F6F43"
 # Même présentation pour EG LABO (décisions pharmacien du 23/11/2026) : sous
 # « EG LABO / Générique (répertoire) / Total », les génériques non remboursés
@@ -833,7 +833,7 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
                 "Cet onglet présente le CA intégral : les références exclues de "
                 "l'assiette de remontée de remise y sont incluses, isolées sur la "
                 "ligne « dont exclusions répertoire » et détaillées sous le tableau ; "
-                "la ligne « Assiette remise » en dessous = Total − exclusions "
+                "la ligne « Assiette remise » en dessous = Total − non remboursés − exclusions "
                 "— voir l'onglet « Assiette remise Biogaran » pour l'assiette corrigée. "
                 "Même présentation pour EG LABO : lignes « dont non remboursés », « dont exclusions » "
                 "(calcium D3 et nicotine remboursables) et « Assiette remise EG » = génériques du "
@@ -905,7 +905,10 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
             for canal in CANAUX_BIOGARAN_DETAIL:
                 lignes_a_afficher.append((labo, type_med, canal))
             lignes_a_afficher.append((labo, type_med, "Total"))
-            if type_med == "Générique (répertoire)" and EXCLUSIONS_BASE_REMISE:
+            if type_med == "Générique (répertoire)":
+                # Assiette RDP = répertoire − non remboursés − exclusions
+                # (non remboursés hors assiette : décision pharmacien du 23/11/2026)
+                lignes_a_afficher.append((labo, type_med, LIGNE_NR_EG))
                 lignes_a_afficher.append((labo, type_med, LIGNE_EXCLUSIONS_REPERTOIRE))
                 lignes_a_afficher.append((labo, type_med, LIGNE_ASSIETTE_REMISE))
         elif labo == GENERIQUEUR_EG and type_med == "Générique (répertoire)":
@@ -933,11 +936,12 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
         elif canal == LIGNE_EXCLUSIONS_EG:
             canal_crit = f',{rng_exclu_eg},"{EXCL_OUI}"'
         elif canal == LIGNE_NR_EG:
-            canal_crit = f',{rng_remb},"{NON_REMBOURSE}"'
+            # Non remboursés hors références déjà exclues (pas de double déduction)
+            canal_crit = f',{rng_remb},"{NON_REMBOURSE}",{rng_exclu},"{EXCL_NON}"'
 
         if canal in LIGNES_ASSIETTE:
             # Total − lignes « dont » situées entre la ligne Total et celle-ci.
-            n_dont = 3 if canal == LIGNE_REPERTOIRE_MOINS_EXCL_EG else 2
+            n_dont = 3   # Total, puis « dont non remboursés » et « dont exclusions »
             for periode in list(periodes) + ["__TOTAL__"]:
                 c0 = period_col_start[periode] if periode != "__TOTAL__" else total_col_start
                 for off in (0, 1):
@@ -1238,8 +1242,9 @@ def build_sheet_assiette_remise(wb, all_rows, n_detail):
     ws = wb.create_sheet("Assiette remise Biogaran")
     ws["A1"] = "Assiette de la remontée de remise Biogaran — détail mensuel"
     ws["A1"].font = TITLE_FONT
-    ws["A2"] = ("Les références Biogaran entrées au répertoire des génériques en cours "
-                "d'année sont déduites de l'assiette (colonne C), sur toute l'année. "
+    ws["A2"] = ("Assiette = génériques Biogaran du répertoire, remboursables, moins les références "
+                "entrées au répertoire en cours d'année (déduites sur toute l'année). Les génériques "
+                "non remboursés sont hors assiette (colonne C). "
                 "La remontée théorique est un calcul au plafond de 40 % "
                 "(art. L138-9 CSS) : à rapprocher des avoirs RDP réellement reçus, "
                 "ce n'est pas un montant dû constaté.")
@@ -1255,12 +1260,16 @@ def build_sheet_assiette_remise(wb, all_rows, n_detail):
     rng_ca = f"{detail_sheet}!$L$2:$L${n_detail}"
     rng_remise = f"{detail_sheet}!$N$2:$N${n_detail}"
     rng_exclu = f"{detail_sheet}!$S$2:$S${n_detail}"
+    rng_remb = f"{detail_sheet}!$H$2:$H${n_detail}"
 
     base_crit = f'{rng_labo},"BIOGARAN",{rng_type},"Générique (répertoire)"'
+    nr_crit = f',{rng_remb},"{NON_REMBOURSE}",{rng_exclu},"{EXCL_NON}"'
+    garde_crit = f',{rng_remb},"<>{NON_REMBOURSE}",{rng_exclu},"{EXCL_NON}"'
 
     headers = [
         "Période",
         "CA répertoire Biogaran (€)",
+        "dont non remboursés — hors assiette (€)",
         "dont exclu — entrée répertoire en cours d'année (€)",
         "Assiette retenue (€)",
         "Remise facturée sur assiette (€)",
@@ -1292,31 +1301,33 @@ def build_sheet_assiette_remise(wb, all_rows, n_detail):
         ws.cell(row=row, column=2,
                 value=f'=SUMIFS({rng_ca},{base_crit}{per_crit})')
         ws.cell(row=row, column=3,
+                value=f'=SUMIFS({rng_ca},{base_crit}{per_crit}{nr_crit})')
+        ws.cell(row=row, column=4,
                 value=f'=SUMIFS({rng_ca},{base_crit}{per_crit},{rng_exclu},"{EXCL_OUI}")')
-        ws.cell(row=row, column=4, value=f"=B{row}-C{row}")
+        ws.cell(row=row, column=5, value=f"=B{row}-C{row}-D{row}")
         # Remise facturée sur les seules lignes conservées dans l'assiette.
-        ws.cell(row=row, column=5,
-                value=f'=SUMIFS({rng_remise},{base_crit}{per_crit},{rng_exclu},"{EXCL_NON}")')
-        ws.cell(row=row, column=6, value=f"=IFERROR(E{row}/D{row},0)")
-        ws.cell(row=row, column=7, value=f"=D{row}*{PLAFOND_REMISE_GENERIQUES}")
-        ws.cell(row=row, column=8, value=f"=MAX(0,G{row}-E{row})")
+        ws.cell(row=row, column=6,
+                value=f'=SUMIFS({rng_remise},{base_crit}{per_crit}{garde_crit})')
+        ws.cell(row=row, column=7, value=f"=IFERROR(F{row}/E{row},0)")
+        ws.cell(row=row, column=8, value=f"=E{row}*{PLAFOND_REMISE_GENERIQUES}")
+        ws.cell(row=row, column=9, value=f"=MAX(0,H{row}-F{row})")
 
     last_row = first_data_row + len(periodes) - 1
     total_row = last_row + 1
     ws.cell(row=total_row, column=1, value="TOTAL")
-    for col in (2, 3, 4, 5):
+    for col in (2, 3, 4, 5, 6):
         letter = get_column_letter(col)
         ws.cell(row=total_row, column=col,
                 value=f"=SUM({letter}{first_data_row}:{letter}{last_row})")
-    ws.cell(row=total_row, column=6, value=f"=IFERROR(E{total_row}/D{total_row},0)")
-    ws.cell(row=total_row, column=7, value=f"=D{total_row}*{PLAFOND_REMISE_GENERIQUES}")
-    ws.cell(row=total_row, column=8, value=f"=MAX(0,G{total_row}-E{total_row})")
+    ws.cell(row=total_row, column=7, value=f"=IFERROR(F{total_row}/E{total_row},0)")
+    ws.cell(row=total_row, column=8, value=f"=E{total_row}*{PLAFOND_REMISE_GENERIQUES}")
+    ws.cell(row=total_row, column=9, value=f"=MAX(0,H{total_row}-F{total_row})")
 
     for row in range(first_data_row, total_row + 1):
         is_total = (row == total_row)
-        for col in (2, 3, 4, 5, 7, 8):
+        for col in (2, 3, 4, 5, 6, 8, 9):
             ws.cell(row=row, column=col).number_format = EUR_FMT
-        ws.cell(row=row, column=6).number_format = PCT_FMT
+        ws.cell(row=row, column=7).number_format = PCT_FMT
         for col in range(1, len(headers) + 1):
             cell = ws.cell(row=row, column=col)
             cell.font = BOLD_FONT if is_total else NORMAL_FONT
@@ -1336,7 +1347,31 @@ def build_sheet_assiette_remise(wb, all_rows, n_detail):
         ws.cell(row=row, column=2, value=libelle).font = NORMAL_FONT
         row += 1
 
-    widths = {"A": 16, "B": 24, "C": 26, "D": 18, "E": 22, "F": 20, "G": 20, "H": 24}
+    # Génériques Biogaran non remboursés achetés (hors assiette)
+    nr = defaultdict(float)
+    for r_ in all_rows:
+        if (r_.get("genericqueur") == "BIOGARAN" and r_.get("type_medicament") == "Générique (répertoire)"
+                and r_.get("remboursement") == NON_REMBOURSE and not r_.get("exclu_base_remise")):
+            nr[(r_["cip13"], r_.get("libelle") or "")] += r_["ca_ppht"]
+    row += 1
+    ws.cell(row=row, column=1,
+            value="Génériques Biogaran non remboursés achetés (hors assiette)").font = BOLD_FONT
+    if not nr:
+        row += 1
+        ws.cell(row=row, column=1, value="Aucun sur la période.").font = NORMAL_FONT
+    for (cip13, libelle), ca in sorted(nr.items(), key=lambda kv: -kv[1]):
+        row += 1
+        ws.cell(row=row, column=1, value=cip13).font = NORMAL_FONT
+        ws.cell(row=row, column=2, value=libelle).font = NORMAL_FONT
+        c = ws.cell(row=row, column=3, value=round(ca, 2))
+        c.font, c.number_format = NORMAL_FONT, EUR_FMT
+
+    _teinter_colonne(ws, 3, first_data_row, last_row, GRIS_CLAIR, Font(name=FONT_NAME, size=10, color="7F7F7F"))
+    _teinter_colonne(ws, 4, first_data_row, last_row, "FFF2CC",
+                     Font(name=FONT_NAME, size=10, italic=True, color=EXCL_FONT_COLOR))
+    _teinter_colonne(ws, 5, first_data_row, total_row, VERT_CLAIR,
+                     Font(name=FONT_NAME, size=10, bold=True, color=ASSIETTE_FONT_COLOR))
+    widths = {"A": 16, "B": 24, "C": 20, "D": 26, "E": 18, "F": 22, "G": 20, "H": 20, "I": 24}
     autosize(ws, widths)
     ws.freeze_panes = f"B{first_data_row}"
     return ws
@@ -1869,6 +1904,9 @@ def build_sheet_methodologie(wb):
         "(art. L138-9 CSS) : remise facturée + remontée (RDP) ≤ 40 %. L'onglet "
         "'Assiette remise Biogaran' calcule, mois par mois, l'assiette retenue et la "
         "remontée théorique restant à percevoir à ce plafond.",
+        "- Les génériques Biogaran NON REMBOURSÉS (ex. cystine B6, minoxidil, vardénafil) "
+        "sont hors assiette (décision pharmacien du 23/11/2026), comme pour EG ; ils sont "
+        "listés sous le tableau.",
         "- EXCLUSION : les molécules Biogaran entrées au répertoire des génériques EN "
         "COURS D'ANNÉE sont déduites de cette assiette, sur toute l'année. Motif : les "
         "fichiers BDPM sont toujours à jour, donc ces références ressortent 'Générique "
