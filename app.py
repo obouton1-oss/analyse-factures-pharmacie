@@ -282,7 +282,8 @@ def detecter_canal(contenu):
     """Canal du PDF : "ocp" (récap BO-OFFREM), "biosim_ocp" (relevé OCP des
     achats de biosimilaires), "direct_labo" (factures directes EG LABO, SANDOZ, TEVA),
     "alliance", "biogaran",
-    "avoir_biogaran" (avoir RDP, non pris en compte), ou None s'il n'est pas
+    "avoir_biogaran" (avoir RDP, non pris en compte), "releve_alliance"
+    (relevé mensuel des factures Alliance, ignoré), ou None s'il n'est pas
     reconnu (facture OCP individuelle, EMAC, autre fournisseur, PDF
     illisible...)."""
     try:
@@ -296,6 +297,11 @@ def detecter_canal(contenu):
         return "biosim_ocp"   # relevé OCP des biosimilaires, trimestriel (BIOST) ou mensuel (BIOSM)
     if "BO-OFFREM" in t:
         return "ocp"
+    if "RELEVE FACTURES PERIODE DU" in t:
+        # Relevé mensuel des factures Alliance (liste des factures, pas de
+        # produit) : inutile au rapport. Règle vérifiée le 23/11/2026 sur les
+        # 1 800 PDF Alliance : 17 relevés reconnus, aucune facture confondue.
+        return "releve_alliance"
     if "ALLIANCE HEALTHCARE" in t:
         return "alliance"
     if ("POUR COMPTE DES LABORATOIRES EG LABO" in t or "DENOMINATION SOCIALE : EG LABO" in t
@@ -476,6 +482,8 @@ for nom, contenu, empreinte, canal in entrees:
         ignores.append((nom, "non reconnu (facture OCP individuelle, EMAC, autre fournisseur…)"))
     elif canal == "avoir_biogaran" or (canal == "biogaran" and nom.lower().startswith("avoir_")):
         ignores.append((nom, "avoir Biogaran (non pris en compte)"))
+    elif canal == "releve_alliance":
+        ignores.append((nom, "relevé mensuel des factures Alliance (sans détail produit)"))
     else:
         par_canal[canal].append((nom, contenu))
 

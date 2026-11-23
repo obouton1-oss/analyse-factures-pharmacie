@@ -521,11 +521,30 @@ def _resoudre_marque_alliance(r, bdpm):
     return None, False
 
 
+def _est_releve_alliance(pdf_path):
+    """Relevé mensuel des factures Alliance (« Relevé Factures période du ... ») :
+    liste des factures du mois, sans ligne produit. Ajouté à la main dans le
+    canal Alliance, il est écarté ici sans alerte."""
+    import unicodedata
+    import pdfplumber
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            t = (pdf.pages[0].extract_text() or "") if pdf.pages else ""
+    except Exception:
+        return False
+    t = "".join(c for c in unicodedata.normalize("NFKD", t) if not unicodedata.combining(c)).upper()
+    return "RELEVE FACTURES PERIODE DU" in t
+
+
 def enrich_rows_alliance(pdf_paths, bdpm):
     """Canal Alliance : un PDF = une facture grossiste multi-génériqueurs."""
     from parser_alliance import extraire_facture_alliance
     all_rows = []
     for pdf_path in pdf_paths:
+        if _est_releve_alliance(pdf_path):
+            print(f"  Relevé de factures Alliance ignoré (liste des factures, sans détail produit) : "
+                  f"{os.path.basename(pdf_path)}")
+            continue
         facture = extraire_facture_alliance(pdf_path)
         if not facture["lignes"] and facture.get("total_net_ht") == 0:
             # Facture à 0 € (ex. produit gratuit seul) : rien à intégrer.
@@ -1348,18 +1367,24 @@ def build_sheet_assiette_remise(wb, all_rows, n_detail):
         row += 1
 
     # Génériques Biogaran non remboursés achetés (hors assiette)
-    nr = defaultdict(float)
+    # Un CIP peut avoir plusieurs libellés selon le canal : regroupement par
+    # CIP, avec le libellé le plus long (le plus lisible).
+    nr, libelles = defaultdict(float), {}
     for r_ in all_rows:
         if (r_.get("genericqueur") == "BIOGARAN" and r_.get("type_medicament") == "Générique (répertoire)"
                 and r_.get("remboursement") == NON_REMBOURSE and not r_.get("exclu_base_remise")):
-            nr[(r_["cip13"], r_.get("libelle") or "")] += r_["ca_ppht"]
+            nr[r_["cip13"]] += r_["ca_ppht"]
+            lib = r_.get("libelle") or ""
+            if len(lib) > len(libelles.get(r_["cip13"], "")):
+                libelles[r_["cip13"]] = lib
     row += 1
     ws.cell(row=row, column=1,
             value="Génériques Biogaran non remboursés achetés (hors assiette)").font = BOLD_FONT
     if not nr:
         row += 1
         ws.cell(row=row, column=1, value="Aucun sur la période.").font = NORMAL_FONT
-    for (cip13, libelle), ca in sorted(nr.items(), key=lambda kv: -kv[1]):
+    for cip13, ca in sorted(nr.items(), key=lambda kv: -kv[1]):
+        libelle = libelles.get(cip13, "")
         row += 1
         ws.cell(row=row, column=1, value=cip13).font = NORMAL_FONT
         ws.cell(row=row, column=2, value=libelle).font = NORMAL_FONT
