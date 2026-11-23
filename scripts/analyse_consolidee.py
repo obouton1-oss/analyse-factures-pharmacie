@@ -21,6 +21,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl.formatting.rule import DataBarRule, ColorScaleRule, FormulaRule
 
 from parser_bo_offrem import parse_bo_offrem
 from bdpm import BDPM
@@ -792,14 +793,19 @@ EXCL_FONT_COLOR = "9C5700"
 # Ligne de lecture, elle non plus n'entre pas dans le TOTAL GÉNÉRAL.
 LIGNE_ASSIETTE_REMISE = "Assiette remise (Total − exclusions)"
 ASSIETTE_FONT_COLOR = "1F6F43"
-# Même présentation pour EG LABO (décision pharmacien du 23/11/2026) : sous
-# « EG LABO / Générique (répertoire) / Total », la ligne des exclusions
-# (calcium D3 et nicotine remboursables, cf. EXCLUSIONS_ASSIETTE_EG) puis le
-# répertoire moins ces exclusions ; détail des références sous le tableau.
+# Même présentation pour EG LABO (décisions pharmacien du 23/11/2026) : sous
+# « EG LABO / Générique (répertoire) / Total », les génériques non remboursés
+# (hors assiette), les exclusions (calcium D3 et nicotine remboursables, cf.
+# EXCLUSIONS_ASSIETTE_EG), puis l'assiette de remise EG = génériques du
+# répertoire remboursables moins les exclusions (hybrides et autres produits
+# hors répertoire, dont biosimilaires, n'en font pas partie). Détail des
+# références exclues sous le tableau.
+LIGNE_NR_EG = "dont non remboursés (hors assiette)"
 LIGNE_EXCLUSIONS_EG = "dont exclusions (calcium D3 / nicotine remb.)"
-LIGNE_REPERTOIRE_MOINS_EXCL_EG = "Répertoire moins exclusions"
-LIGNES_EXCLUSIONS = (LIGNE_EXCLUSIONS_REPERTOIRE, LIGNE_EXCLUSIONS_EG)
+LIGNE_REPERTOIRE_MOINS_EXCL_EG = "Assiette remise EG (Total − non remb. − exclusions)"
+LIGNES_EXCLUSIONS = (LIGNE_EXCLUSIONS_REPERTOIRE, LIGNE_EXCLUSIONS_EG, LIGNE_NR_EG)
 LIGNES_ASSIETTE = (LIGNE_ASSIETTE_REMISE, LIGNE_REPERTOIRE_MOINS_EXCL_EG)
+NON_REMBOURSE = "Non remboursé (ou non renseigné)"
 
 
 def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
@@ -829,10 +835,10 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
                 "ligne « dont exclusions répertoire » et détaillées sous le tableau ; "
                 "la ligne « Assiette remise » en dessous = Total − exclusions "
                 "— voir l'onglet « Assiette remise Biogaran » pour l'assiette corrigée. "
-                "Même présentation pour EG LABO : ligne « dont exclusions » (calcium D3 et "
-                "nicotine remboursables) et « Répertoire moins exclusions », références détaillées "
-                "sous le tableau — l'assiette EG complète (répertoire + hybrides + autres "
-                "remboursables) est dans l'onglet « Assiette remise EG ».")
+                "Même présentation pour EG LABO : lignes « dont non remboursés », « dont exclusions » "
+                "(calcium D3 et nicotine remboursables) et « Assiette remise EG » = génériques du "
+                "répertoire remboursables moins les exclusions, références exclues détaillées sous "
+                "le tableau — même montant que l'onglet « Assiette remise EG ».")
     ws["A2"].font = SUBTITLE_FONT
 
     detail_sheet = "'Détail lignes'"
@@ -847,6 +853,7 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
     rng_cip = f"{detail_sheet}!$B$2:$B${n_detail}"
     rng_exclu = f"{detail_sheet}!$S$2:$S${n_detail}"
     rng_exclu_eg = f"{detail_sheet}!$U$2:$U${n_detail}"
+    rng_remb = f"{detail_sheet}!$H$2:$H${n_detail}"
 
     header_row1, header_row2 = 4, 5
     ws.cell(row=header_row1, column=1, value="Laboratoire")
@@ -903,6 +910,7 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
                 lignes_a_afficher.append((labo, type_med, LIGNE_ASSIETTE_REMISE))
         elif labo == GENERIQUEUR_EG and type_med == "Générique (répertoire)":
             lignes_a_afficher.append((labo, type_med, "Total"))
+            lignes_a_afficher.append((labo, type_med, LIGNE_NR_EG))
             lignes_a_afficher.append((labo, type_med, LIGNE_EXCLUSIONS_EG))
             lignes_a_afficher.append((labo, type_med, LIGNE_REPERTOIRE_MOINS_EXCL_EG))
         else:
@@ -924,13 +932,18 @@ def build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills):
             canal_crit = f',{rng_exclu},"{EXCL_OUI}"'
         elif canal == LIGNE_EXCLUSIONS_EG:
             canal_crit = f',{rng_exclu_eg},"{EXCL_OUI}"'
+        elif canal == LIGNE_NR_EG:
+            canal_crit = f',{rng_remb},"{NON_REMBOURSE}"'
 
         if canal in LIGNES_ASSIETTE:
+            # Total − lignes « dont » situées entre la ligne Total et celle-ci.
+            n_dont = 3 if canal == LIGNE_REPERTOIRE_MOINS_EXCL_EG else 2
             for periode in list(periodes) + ["__TOTAL__"]:
                 c0 = period_col_start[periode] if periode != "__TOTAL__" else total_col_start
                 for off in (0, 1):
                     L = get_column_letter(c0 + off)
-                    ws.cell(row=row, column=c0 + off, value=f"={L}{row - 2}-{L}{row - 1}")
+                    moins = "".join(f"-{L}{row - k}" for k in range(1, n_dont))
+                    ws.cell(row=row, column=c0 + off, value=f"={L}{row - n_dont}{moins}")
                 ca_cell = f"{get_column_letter(c0)}{row}"
                 remise_cell = f"{get_column_letter(c0 + 1)}{row}"
                 ws.cell(row=row, column=c0 + 2, value=f"={ca_cell}-{remise_cell}")
@@ -1329,11 +1342,41 @@ def build_sheet_assiette_remise(wb, all_rows, n_detail):
     return ws
 
 
+def _bandeau_groupes(ws, row, groupes):
+    """Ligne de bandeaux colorés au-dessus des en-têtes : groupes =
+    [(col_debut, col_fin, libellé, couleur_fond)]."""
+    for c1, c2, libelle, couleur in groupes:
+        if c2 > c1:
+            ws.merge_cells(start_row=row, start_column=c1, end_row=row, end_column=c2)
+        for c in range(c1, c2 + 1):
+            cell = ws.cell(row=row, column=c)
+            cell.fill = PatternFill("solid", start_color=couleur, end_color=couleur)
+            cell.border = THIN_BORDER
+        cell = ws.cell(row=row, column=c1, value=libelle)
+        cell.font = Font(name=FONT_NAME, bold=True, size=10, color="FFFFFF")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+
+def _teinter_colonne(ws, col, r1, r2, couleur, police=None):
+    for r in range(r1, r2 + 1):
+        cell = ws.cell(row=r, column=col)
+        cell.fill = PatternFill("solid", start_color=couleur, end_color=couleur)
+        if police is not None:
+            cell.font = police
+
+
+GRIS_HORS_ASSIETTE, GRIS_CLAIR = "7F7F7F", "F2F2F2"
+VERT_ASSIETTE, VERT_CLAIR = "1F6F43", "E2EFDA"
+BLEU_REPERTOIRE, BLEU_CLAIR = "2E5395", "DDEBF7"
+ORANGE_EXCL = "9C5700"
+
+
 def build_sheet_assiette_eg(wb, all_rows, n_detail):
-    """Assiette de remise EG LABO, mois par mois, tous canaux : CA EG par
-    catégorie (répertoire, hybride, autres remboursés, non remboursé), moins
-    les exclusions (calcium D3 et nicotine remboursables), remise facturée et
-    taux pondéré sur l'assiette. Formules sur 'Détail lignes'."""
+    """Assiette de remise EG LABO, mois par mois, tous canaux (décision
+    pharmacien du 23/11/2026) : génériques du RÉPERTOIRE remboursables moins
+    les exclusions (calcium D3 et nicotine remboursables). Hybrides, autres
+    produits hors répertoire (biosimilaires...) et non remboursés sont montrés
+    à part, hors assiette. Formules sur 'Détail lignes'."""
     periodes = sorted({r["periode"] for r in all_rows if r.get("genericqueur") == GENERIQUEUR_EG},
                       key=periode_sort_key)
     if not periodes:
@@ -1341,20 +1384,23 @@ def build_sheet_assiette_eg(wb, all_rows, n_detail):
     ws = wb.create_sheet("Assiette remise EG")
     ws["A1"] = "Assiette de remise EG LABO — détail mensuel, tous canaux"
     ws["A1"].font = TITLE_FONT
-    ws["A2"] = ("Assiette = produits EG remboursables (génériques du répertoire, hybrides, autres "
-                "remboursés) moins le calcium vitamine D3 et la nicotine remboursables. Les produits non "
-                "remboursés sont hors assiette. Lignes et motifs : colonnes U/V de 'Détail lignes'.")
+    ws["A2"] = ("Assiette = génériques EG du répertoire, remboursables, moins le calcium vitamine D3 et "
+                "la nicotine remboursables. Hors assiette : non remboursés, hybrides, autres produits "
+                "hors répertoire (dont biosimilaires). Lignes et motifs : colonnes U/V de 'Détail lignes'.")
     ws["A2"].font = SUBTITLE_FONT
     D = "'Détail lignes'"
     rg = lambda c: f"{D}!${c}$2:${c}${n_detail}"
     PER, LAB, TYP, REM, CA, RMS, EXC, CAN = (rg(c) for c in "ADFHLNUR")
-    NR = "Non remboursé (ou non renseigné)"
+    NR = NON_REMBOURSE
+    REP = "Générique (répertoire)"
     base = f'{LAB},"{GENERIQUEUR_EG}"'
-    headers = ["Période", "CA EG total (€)", "dont non remboursé — hors assiette (€)",
-               "Générique répertoire remboursable (€)", "Hybride remboursable (€)",
-               "Autres remboursables (€)", "dont exclu : calcium D3 / nicotine remb. (€)",
-               "Assiette retenue (€)", "Remise facturée sur assiette (€)", "Taux de remise pondéré"]
-    hr = 4
+    headers = ["Période", "CA EG total (€)",
+               "Non remboursés (€)", "Hybrides remb. (€)", "Autres remb. hors répertoire, dont biosimilaires (€)",
+               "Génériques répertoire remboursables (€)", "dont exclusions : calcium D3 / nicotine (€)",
+               "ASSIETTE RETENUE (€)", "Remise facturée sur assiette (€)", "Taux de remise pondéré"]
+    gr, hr = 4, 5
+    _bandeau_groupes(ws, gr, [(1, 2, "", NAVY), (3, 5, "Hors assiette", GRIS_HORS_ASSIETTE),
+                              (6, 7, "Répertoire", BLEU_REPERTOIRE), (8, 10, "Assiette de remise EG", VERT_ASSIETTE)])
     for i, h in enumerate(headers, start=1):
         c = ws.cell(row=hr, column=i, value=h)
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -1364,15 +1410,16 @@ def build_sheet_assiette_eg(wb, all_rows, n_detail):
     for i, per in enumerate(periodes):
         row = first + i
         pc = f'{PER},"{per}"'
+        rep_remb = f'{base},{pc},{TYP},"{REP}",{REM},"<>{NR}"'
         ws.cell(row=row, column=1, value=per)
         ws.cell(row=row, column=2, value=f"=SUMIFS({CA},{base},{pc})")
         ws.cell(row=row, column=3, value=f'=SUMIFS({CA},{base},{pc},{REM},"{NR}")')
-        ws.cell(row=row, column=4, value=f'=SUMIFS({CA},{base},{pc},{TYP},"Générique (répertoire)",{REM},"<>{NR}")')
-        ws.cell(row=row, column=5, value=f'=SUMIFS({CA},{base},{pc},{TYP},"Hybride",{REM},"<>{NR}")')
-        ws.cell(row=row, column=6, value=f"=B{row}-C{row}-D{row}-E{row}")
-        ws.cell(row=row, column=7, value=f'=SUMIFS({CA},{base},{pc},{EXC},"{EXCL_OUI}")')
-        ws.cell(row=row, column=8, value=f"=D{row}+E{row}+F{row}-G{row}")
-        ws.cell(row=row, column=9, value=f'=SUMIFS({RMS},{base},{pc},{REM},"<>{NR}",{EXC},"{EXCL_NON}")')
+        ws.cell(row=row, column=4, value=f'=SUMIFS({CA},{base},{pc},{TYP},"Hybride",{REM},"<>{NR}")')
+        ws.cell(row=row, column=5, value=f"=B{row}-C{row}-D{row}-F{row}")
+        ws.cell(row=row, column=6, value=f"=SUMIFS({CA},{rep_remb})")
+        ws.cell(row=row, column=7, value=f'=SUMIFS({CA},{base},{pc},{TYP},"{REP}",{EXC},"{EXCL_OUI}")')
+        ws.cell(row=row, column=8, value=f"=F{row}-G{row}")
+        ws.cell(row=row, column=9, value=f'=SUMIFS({RMS},{rep_remb},{EXC},"{EXCL_NON}")')
         ws.cell(row=row, column=10, value=f"=IFERROR(I{row}/H{row},0)")
     last = first + len(periodes) - 1
     tot = last + 1
@@ -1391,28 +1438,46 @@ def build_sheet_assiette_eg(wb, all_rows, n_detail):
             if 2 <= col <= 9:
                 c.number_format = EUR_FMT
         ws.cell(row=row, column=10).number_format = PCT_FMT
+    for col in (3, 4, 5):
+        _teinter_colonne(ws, col, first, last, GRIS_CLAIR, Font(name=FONT_NAME, size=10, color="7F7F7F"))
+    _teinter_colonne(ws, 6, first, last, BLEU_CLAIR)
+    _teinter_colonne(ws, 7, first, last, "FFF2CC", Font(name=FONT_NAME, size=10, italic=True, color=ORANGE_EXCL))
+    for col in (8, 9, 10):
+        _teinter_colonne(ws, col, first, tot, VERT_CLAIR,
+                         Font(name=FONT_NAME, size=10, bold=True, color=VERT_ASSIETTE))
+    ws.conditional_formatting.add(f"H{first}:H{last}",
+                                  DataBarRule(start_type="num", start_value=0, end_type="max",
+                                              color="63BE7B", showValue=True))
 
     # Assiette par canal
     canaux = sorted({r["canal"] for r in all_rows if r.get("genericqueur") == GENERIQUEUR_EG})
     row = tot + 2
-    ws.cell(row=row, column=1, value="Assiette retenue par canal (€)").font = BOLD_FONT
+    ws.cell(row=row, column=1, value="Assiette retenue par canal").font = BOLD_FONT
     row += 1
-    for i, h in enumerate(["Canal", "Assiette retenue (€)", "Remise facturée (€)", "Taux pondéré"], start=1):
+    for i, h in enumerate(["Canal", "Assiette retenue (€)", "Remise facturée (€)", "Taux pondéré",
+                           "Part de l'assiette"], start=1):
         ws.cell(row=row, column=i, value=h)
-    style_header_row(ws, row, 4)
+    style_header_row(ws, row, 5)
+    premier_canal = row + 1
     for canal in canaux:
         row += 1
-        cc = f'{CAN},"{canal}"'
+        cc = f'{base},{CAN},"{canal}",{TYP},"{REP}",{REM},"<>{NR}",{EXC},"{EXCL_NON}"'
         ws.cell(row=row, column=1, value=canal)
-        ws.cell(row=row, column=2, value=f'=SUMIFS({CA},{base},{cc},{REM},"<>{NR}",{EXC},"{EXCL_NON}")')
-        ws.cell(row=row, column=3, value=f'=SUMIFS({RMS},{base},{cc},{REM},"<>{NR}",{EXC},"{EXCL_NON}")')
+        ws.cell(row=row, column=2, value=f"=SUMIFS({CA},{cc})")
+        ws.cell(row=row, column=3, value=f"=SUMIFS({RMS},{cc})")
         ws.cell(row=row, column=4, value=f"=IFERROR(C{row}/B{row},0)")
-        for col in range(1, 5):
+        ws.cell(row=row, column=5, value=f"=IFERROR(B{row}/$H${tot},0)")
+        for col in range(1, 6):
             ws.cell(row=row, column=col).font = NORMAL_FONT
             ws.cell(row=row, column=col).border = THIN_BORDER
         ws.cell(row=row, column=2).number_format = EUR_FMT
         ws.cell(row=row, column=3).number_format = EUR_FMT
         ws.cell(row=row, column=4).number_format = PCT_FMT
+        ws.cell(row=row, column=5).number_format = PCT_FMT
+    if canaux:
+        ws.conditional_formatting.add(f"E{premier_canal}:E{row}",
+                                      DataBarRule(start_type="num", start_value=0, end_type="num",
+                                                  end_value=1, color="5B9BD5", showValue=True))
 
     # Références exclues rencontrées
     exclues = {}
@@ -1420,7 +1485,8 @@ def build_sheet_assiette_eg(wb, all_rows, n_detail):
         if r.get("motif_exclusion_eg"):
             exclues.setdefault((r["motif_exclusion_eg"], r["cip13"]), r.get("libelle", ""))
     row += 2
-    ws.cell(row=row, column=1, value="Références EG exclues de l'assiette (rencontrées)").font = BOLD_FONT
+    ws.cell(row=row, column=1, value="Références EG exclues de l'assiette (achetées sur la période)").font = Font(
+        name=FONT_NAME, bold=True, size=10, color=ORANGE_EXCL)
     if not exclues:
         row += 1
         ws.cell(row=row, column=1, value="Aucune sur la période.").font = NORMAL_FONT
@@ -1428,8 +1494,8 @@ def build_sheet_assiette_eg(wb, all_rows, n_detail):
         row += 1
         ws.cell(row=row, column=1, value=cip).font = NORMAL_FONT
         ws.cell(row=row, column=2, value=lib).font = NORMAL_FONT
-        ws.cell(row=row, column=4, value=motif).font = NORMAL_FONT
-    autosize(ws, {"A": 22, "B": 16, "C": 18, "D": 18, "E": 16, "F": 16, "G": 20, "H": 16, "I": 18, "J": 14})
+        ws.cell(row=row, column=5, value=motif).font = NORMAL_FONT
+    autosize(ws, {"A": 22, "B": 16, "C": 15, "D": 15, "E": 20, "F": 18, "G": 18, "H": 18, "I": 18, "J": 14})
     ws.freeze_panes = f"B{first}"
 
 
@@ -1749,9 +1815,11 @@ def build_sheet_methodologie(wb):
         "- Avoirs EG (« remise additionnelle »), Sandoz et Teva (ristournes) : ignorés pour l'instant.",
         "",
         "ASSIETTE DE REMISE EG",
-        "- Produits EG remboursables, tous canaux (génériques du répertoire, hybrides, autres "
-        "remboursés), moins le calcium vitamine D3 et la nicotine remboursables (règle par "
-        "mots-clés : EXCLUSIONS_ASSIETTE_EG). Onglet 'Assiette remise EG'.",
+        "- Génériques EG du répertoire, remboursables, tous canaux, moins le calcium vitamine D3 "
+        "et la nicotine remboursables (règle par mots-clés : EXCLUSIONS_ASSIETTE_EG). Hybrides, "
+        "autres produits hors répertoire (dont biosimilaires) et non remboursés : hors assiette, "
+        "montrés à part. Onglet 'Assiette remise EG' et ligne « Assiette remise EG » de l'onglet "
+        "'CA type x laboratoire' (même montant).",
         "",
         "RATTRAPAGE TEVA",
         "- Génériques TEVA du répertoire remboursables, tous canaux. Remise facturée 10/20/30 % → "
@@ -1893,6 +1961,32 @@ def _marque(designation):
 
 
 LABO_PARTENAIRE_BIOSIM = "SANDOZ"   # partenariat biosimilaires (parts de marché suivies)
+TEAL, TEAL_CLAIR = "00838F", "DDF2F4"   # couleur du partenaire dans les onglets biosimilaires
+ROUGE_FUITE, ROUGE_CLAIR = "C00000", "FCE4E4"
+
+
+def _titre_section(ws, row, texte, ncols, couleur=NAVY):
+    """Titre de section : bandeau coloré sur toute la largeur du tableau."""
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncols)
+    cell = ws.cell(row=row, column=1, value=texte)
+    cell.font = Font(name=FONT_NAME, bold=True, size=11, color="FFFFFF")
+    cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    for c in range(1, ncols + 1):
+        ws.cell(row=row, column=c).fill = PatternFill("solid", start_color=couleur, end_color=couleur)
+    ws.row_dimensions[row].height = 20
+
+
+def _echelle_part(ws, plage):
+    """Échelle de couleurs rouge → jaune → vert sur une plage de parts (0 à 100 %)."""
+    ws.conditional_formatting.add(plage, ColorScaleRule(
+        start_type="num", start_value=0, start_color="F8696B",
+        mid_type="num", mid_value=0.5, mid_color="FFEB84",
+        end_type="num", end_value=1, end_color="63BE7B"))
+
+
+def _barre(ws, plage, couleur, maxi=1):
+    ws.conditional_formatting.add(plage, DataBarRule(
+        start_type="num", start_value=0, end_type="num", end_value=maxi, color=couleur, showValue=True))
 
 
 def imputer_remises_biosimilaires(releves, all_rows):
@@ -2014,10 +2108,10 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
 
     # Emplacements connus à l'avance (le détail, en bas, sert aux formules)
     n_mol, n_lab, nT = len(molecules), len(labos), len(trimestres)
-    h1 = 5
-    h2 = h1 + n_mol + 4
-    h3 = h2 + n_mol + 4
-    h4 = h3 + n_lab + 4
+    h1 = 6
+    h2 = h1 + n_mol + 5
+    h3 = h2 + n_mol + 5
+    h4 = h3 + n_lab + 5
     first_det, last_det = h4 + 1, h4 + len(lignes)
 
     def rng(col):
@@ -2028,8 +2122,9 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
     R_BRUT, R_REM, R_NET = rng("I"), rng("J"), rng("K")
 
     # --- 1. Par molécule -------------------------------------------------
-    ws.cell(row=h1 - 1, column=1,
-            value=f"1. Par molécule — prix brut, prix remisé, part de marché {p_nom}").font = BOLD_FONT
+    _titre_section(ws, h1 - 2, f"1. Par molécule — prix brut, prix remisé, part de marché {p_nom}", 11)
+    _bandeau_groupes(ws, h1 - 1, [(1, 1, "", NAVY), (2, 7, "Tous laboratoires", BLEU_REPERTOIRE),
+                                  (8, 11, p_nom, TEAL)])
     headers = ["Molécule", "CA brut (€)", "Remise (€)", "CA remisé (€)", "Taux de remise",
                "dont biosimilaires — CA brut (€)", "Part biosimilaire",
                f"{p_nom} — CA brut (€)", f"{p_nom} — remise (€)", f"{p_nom} — CA remisé (€)",
@@ -2061,18 +2156,23 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
         ws.cell(row=row, column=7, value=f"=IFERROR(F{row}/B{row},0)")
         ws.cell(row=row, column=11, value=f"=IFERROR(H{row}/B{row},0)")
     _mise_en_forme_tableau(ws, h1 + 1, t1, len(headers), {2, 3, 4, 6, 8, 9, 10}, {5, 7, 11})
+    for c in range(8, 12):
+        ws.cell(row=h1, column=c).fill = PatternFill("solid", start_color=TEAL, end_color=TEAL)
+        _teinter_colonne(ws, c, h1 + 1, t1 - 1, TEAL_CLAIR)
+    _barre(ws, f"G{h1 + 1}:G{t1}", "5B9BD5")
+    _barre(ws, f"K{h1 + 1}:K{t1}", TEAL)
 
     # --- 2. Part de marché du partenaire par trimestre -------------------
-    ws.cell(row=h2 - 1, column=1,
-            value=f"2. Part de marché {p_nom} par molécule et par trimestre "
-                  f"(CA brut {p_nom} / CA brut de la molécule)").font = BOLD_FONT
+    _titre_section(ws, h2 - 1, f"2. Part de marché {p_nom} par molécule et par trimestre "
+                               f"(CA brut {p_nom} / CA brut de la molécule ; vide = aucun achat ; — = aucun produit {p_nom})",
+                   max(11, 4 + nT), TEAL)
     headers2 = ["Molécule"] + [f"Part {p_nom} {t}" for t in trimestres] + [
         f"Part {p_nom} cumul", f"{p_nom} — CA brut cumul (€)", "Molécule — CA brut cumul (€)"]
     for i, h in enumerate(headers2, start=1):
         ws.cell(row=h2, column=i, value=h).alignment = Alignment(
             horizontal="center", vertical="center", wrap_text=True)
     style_header_row(ws, h2, len(headers2))
-    ws.row_dimensions[h2].height = 32
+    ws.row_dimensions[h2].height = 44
     c_sp, c_tot = 3 + nT, 4 + nT
     L_sp, L_tot = get_column_letter(c_sp), get_column_letter(c_tot)
     t2 = h2 + 1 + n_mol
@@ -2082,16 +2182,34 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
         ws.cell(row=row, column=1, value="TOTAL" if is_tot else molecules[k])
         m = "" if is_tot else f",{R_MOL},$A{row}"
         for j, t in enumerate(trimestres):
+            tot_t = f'SUMIFS({R_BRUT},{R_TRIM},"{t}"{m})'
             ws.cell(row=row, column=2 + j,
-                    value=f'=IFERROR(SUMIFS({R_BRUT},{R_TRIM},"{t}",{R_LAB},"{P}"{m})'
-                          f'/SUMIFS({R_BRUT},{R_TRIM},"{t}"{m}),0)')
+                    value=f'=IF({tot_t}=0,"",SUMIFS({R_BRUT},{R_TRIM},"{t}",{R_LAB},"{P}"{m})/{tot_t})')
         ws.cell(row=row, column=c_sp, value=f'=SUMIFS({R_BRUT},{R_LAB},"{P}"{m})')
         ws.cell(row=row, column=c_tot, value=f"=SUMIFS({R_BRUT}{m})" if m else f"=SUM({R_BRUT})")
         ws.cell(row=row, column=2 + nT, value=f"=IFERROR({L_sp}{row}/{L_tot}{row},0)")
     _mise_en_forme_tableau(ws, h2 + 1, t2, len(headers2), {c_sp, c_tot}, set(range(2, 3 + nT)))
+    # Molécules sans aucun produit du partenaire acheté : pas de part à suivre
+    # (« — » en gris, hors échelle de couleurs).
+    mol_partenaire = {l["molecule"] for l in lignes if l["laboratoire"] == P}
+    for k, mol in enumerate(molecules):
+        if mol in mol_partenaire:
+            continue
+        row = h2 + 1 + k
+        for c in range(1, 3 + nT):
+            cell = ws.cell(row=row, column=c)
+            if c > 1:
+                cell.value = "—"
+            cell.font = Font(name=FONT_NAME, size=10, italic=True, color="A6A6A6")
+    for c in range(1, len(headers2) + 1):
+        ws.cell(row=h2, column=c).fill = PatternFill("solid", start_color=TEAL, end_color=TEAL)
+    _echelle_part(ws, f"B{h2 + 1}:{get_column_letter(2 + nT)}{t2}")
+    for r in range(h2 + 1, t2 + 1):
+        for c in range(2, 3 + nT):
+            ws.cell(row=r, column=c).alignment = Alignment(horizontal="center")
 
     # --- 3. Par laboratoire ---------------------------------------------
-    ws.cell(row=h3 - 1, column=1, value="3. Par laboratoire — CA brut (€)").font = BOLD_FONT
+    _titre_section(ws, h3 - 1, "3. Par laboratoire — CA brut (€)", max(11, 7 + nT))
     headers3 = (["Laboratoire"] + [f"CA brut {t}" for t in trimestres]
                 + ["CA brut (€)", "Remise (€)", "CA remisé (€)", "dont biosimilaires — CA brut (€)",
                    "Qté", "Part du CA brut total"])
@@ -2122,9 +2240,16 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
         ws.cell(row=row, column=cP, value=f"=IFERROR({LB}{row}/{LB}${t3},0)")
     _mise_en_forme_tableau(ws, h3 + 1, t3, len(headers3),
                            set(range(2, cQ)), {cP})
+    if P in labos:
+        rp = h3 + 1 + labos.index(P)
+        for c in range(1, len(headers3) + 1):
+            cell = ws.cell(row=rp, column=c)
+            cell.fill = PatternFill("solid", start_color=TEAL_CLAIR, end_color=TEAL_CLAIR)
+            cell.font = Font(name=FONT_NAME, bold=True, size=10, color=TEAL)
+    _barre(ws, f"{get_column_letter(cP)}{h3 + 1}:{get_column_letter(cP)}{t3 - 1}", "5B9BD5")
 
     # --- 4. Détail produit x trimestre ------------------------------------
-    ws.cell(row=h4 - 1, column=1, value="4. Détail par produit et par trimestre").font = BOLD_FONT
+    _titre_section(ws, h4 - 1, f"4. Détail par produit et par trimestre (lignes {p_nom} surlignées)", 12)
     headers_d = ["Molécule", "Statut", "Laboratoire", "Désignation", "CIP13", "Trimestre",
                  "Qté", "CA PGHT (€)", "CA brut (€)", "Remise (€)", "CA remisé (€)", "Source"]
     for i, h in enumerate(headers_d, start=1):
@@ -2141,13 +2266,168 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
             if 8 <= c <= 11:
                 cell.number_format = EUR_FMT
     tab = Table(displayName="Biosimilaires", ref=f"A{h4}:L{last_det}")
-    tab.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
+    tab.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=True)
     ws.add_table(tab)
+    ws.conditional_formatting.add(f"A{first_det}:L{last_det}", FormulaRule(
+        formula=[f'$C{first_det}="{P}"'],
+        fill=PatternFill("solid", start_color=TEAL_CLAIR, end_color=TEAL_CLAIR),
+        font=Font(color=TEAL, bold=True)))
+    ws.conditional_formatting.add(f"B{first_det}:B{last_det}", FormulaRule(
+        formula=[f'$B{first_det}="Bioréférent"'], font=Font(italic=True, color="7F7F7F")))
 
-    autosize(ws, {"A": 26, "B": 14, "C": 14, "D": 34, "E": 15, "F": 14, "G": 14,
+    for r in range(first_det, last_det + 1):
+        ws.cell(row=r, column=3).alignment = Alignment(wrap_text=True, vertical="center")
+        ws.cell(row=r, column=4).alignment = Alignment(wrap_text=True, vertical="center")
+    autosize(ws, {"A": 24, "B": 14, "C": 22, "D": 28, "E": 15, "F": 14, "G": 14,
                   "H": 14, "I": 14, "J": 14, "K": 15, "L": 15,
                   **{get_column_letter(c): 14 for c in range(13, 3 + nT + 7)}})
     ws.freeze_panes = "B4"
+    return {"lignes": lignes, "first_det": first_det, "last_det": last_det,
+            "trimestres": trimestres}
+
+
+def build_sheet_fuite_sandoz(wb, info):
+    """Onglet « Fuite biosimilaires Sandoz » : pour chaque molécule où le
+    partenaire (Sandoz) a au moins un produit acheté sur la période, les
+    achats faits chez un autre laboratoire (biosimilaires et bioréférent).
+    Formules SUMIFS sur le détail de l'onglet « Biosimilaires »."""
+    if not info:
+        return
+    P = LABO_PARTENAIRE_BIOSIM
+    p_nom = P.capitalize()
+    lignes, trimestres = info["lignes"], info["trimestres"]
+    produits_p = defaultdict(set)
+    for l in lignes:
+        if l["laboratoire"] == P:
+            produits_p[l["molecule"]].add(l["designation"])
+    molecules = sorted(produits_p)
+    fuites = sorted({(l["molecule"], l["statut"], l["laboratoire"], l["designation"], cle_cip13(l["cip13"]))
+                     for l in lignes if l["molecule"] in produits_p and l["laboratoire"] != P})
+    ws = wb.create_sheet(f"Fuite biosimilaires {p_nom}")
+    ws["A1"] = f"Fuite biosimilaires — molécules disponibles chez {p_nom}, achetées chez un autre laboratoire"
+    ws["A1"].font = TITLE_FONT
+    ws["A2"] = (f"Molécule « disponible chez {p_nom} » = au moins un produit {p_nom} de cette molécule acheté "
+                "sur la période (relevé OCP ou factures directes) : une molécule dont aucun produit "
+                f"{p_nom} n'a été acheté n'apparaît pas ici. Bioréférents compris. Montants en CA brut "
+                "(prix avant remise), repris de l'onglet « Biosimilaires ».")
+    ws["A2"].font = SUBTITLE_FONT
+    ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
+    ws.merge_cells("A2:J2")
+    ws.row_dimensions[2].height = 44
+    B = "'Biosimilaires'!"
+    f0, f1 = info["first_det"], info["last_det"]
+    rb = lambda c: f"{B}${c}${f0}:${c}${f1}"
+    R_MOL, R_STAT, R_LAB, R_CIP, R_TRIM, R_QTE = rb("A"), rb("B"), rb("C"), rb("E"), rb("F"), rb("G")
+    R_BRUT, R_REM = rb("I"), rb("J")
+
+    # 1. Synthèse par molécule — colonnes alignées sur le détail (2.) pour
+    # que les colonnes de texte larges tombent au même endroit.
+    h1 = 5
+    _titre_section(ws, h1 - 1, "1. Synthèse par molécule", 8, ROUGE_FUITE)
+    hdr = ["Molécule", "Laboratoires concernés", f"Produits {p_nom} achetés", "CA brut molécule (€)",
+           f"CA brut {p_nom} (€)", f"CA brut hors {p_nom} — fuite (€)", "Part de la fuite",
+           f"Qté hors {p_nom}"]
+    for i, h in enumerate(hdr, start=1):
+        ws.cell(row=h1, column=i, value=h).alignment = Alignment(horizontal="center", vertical="center",
+                                                                  wrap_text=True)
+    style_header_row(ws, h1, len(hdr))
+    ws.row_dimensions[h1].height = 34
+    for k, mol in enumerate(molecules):
+        row = h1 + 1 + k
+        m = f"{R_MOL},$A{row}"
+        labs = sorted({f[2] for f in fuites if f[0] == mol})
+        ws.cell(row=row, column=1, value=mol)
+        ws.cell(row=row, column=2, value=", ".join(labs) if labs else "— (aucune fuite)")
+        ws.cell(row=row, column=3, value="\n".join(sorted(produits_p[mol])))
+        ws.cell(row=row, column=4, value=f"=SUMIFS({R_BRUT},{m})")
+        ws.cell(row=row, column=5, value=f'=SUMIFS({R_BRUT},{m},{R_LAB},"{P}")')
+        ws.cell(row=row, column=6, value=f"=D{row}-E{row}")
+        ws.cell(row=row, column=8, value=f'=SUMIFS({R_QTE},{m},{R_LAB},"<>{P}")')
+    t1 = h1 + 1 + len(molecules)
+    ws.cell(row=t1, column=1, value="TOTAL")
+    for c in (4, 5, 6, 8):
+        L = get_column_letter(c)
+        ws.cell(row=t1, column=c, value=f"=SUM({L}{h1 + 1}:{L}{t1 - 1})")
+    for row in range(h1 + 1, t1 + 1):
+        ws.cell(row=row, column=7, value=f"=IFERROR(F{row}/D{row},0)")
+    _mise_en_forme_tableau(ws, h1 + 1, t1, len(hdr), {4, 5, 6}, {7})
+    ws.row_dimensions[h1].height = 44
+    for r in range(h1 + 1, t1):
+        for c in range(1, len(hdr) + 1):
+            ws.cell(row=r, column=c).alignment = Alignment(wrap_text=(c in (2, 3)), vertical="center")
+        ws.cell(row=r, column=3).font = Font(name=FONT_NAME, size=9, color=TEAL)
+        ws.cell(row=r, column=6).font = Font(name=FONT_NAME, size=10, bold=True, color=ROUGE_FUITE)
+    _teinter_colonne(ws, 5, h1 + 1, t1 - 1, TEAL_CLAIR)
+    _teinter_colonne(ws, 6, h1 + 1, t1 - 1, ROUGE_CLAIR)
+    _barre(ws, f"G{h1 + 1}:G{t1}", "F8696B")
+
+    # 2. Détail des achats hors partenaire
+    h2 = t1 + 4
+    nT = len(trimestres)
+    ncol = 5 + nT + 4
+    _titre_section(ws, h2 - 1, f"2. Détail des achats hors {p_nom}, par produit (bioréférents en gris)",
+                   ncol, ROUGE_FUITE)
+    hdr2 = (["Molécule", "Laboratoire", "Désignation", "Statut", "CIP13"]
+            + [f"CA brut {t}" for t in trimestres] + ["Qté", "CA brut (€)", "Remise (€)", "CA remisé (€)"])
+    for i, h in enumerate(hdr2, start=1):
+        ws.cell(row=h2, column=i, value=h).alignment = Alignment(horizontal="center", vertical="center",
+                                                                  wrap_text=True)
+    style_header_row(ws, h2, len(hdr2))
+    ws.row_dimensions[h2].height = 32
+    cQ, cB, cR, cN = 6 + nT, 7 + nT, 8 + nT, 9 + nT
+    row = h2
+    sous_totaux = []
+    for mol in molecules:
+        prods = [f for f in fuites if f[0] == mol]
+        if not prods:
+            continue
+        debut = row + 1
+        for (_, statut, lab, desig, cip) in prods:
+            row += 1
+            crit = f"{R_CIP},$E{row},{R_LAB},$B{row}"
+            vals = [mol, lab, desig, statut, cip]
+            for c, v in enumerate(vals, start=1):
+                ws.cell(row=row, column=c, value=v)
+            for j, t in enumerate(trimestres):
+                ws.cell(row=row, column=6 + j, value=f'=SUMIFS({R_BRUT},{crit},{R_TRIM},"{t}")')
+            ws.cell(row=row, column=cQ, value=f"=SUMIFS({R_QTE},{crit})")
+            ws.cell(row=row, column=cB, value=f"=SUMIFS({R_BRUT},{crit})")
+            ws.cell(row=row, column=cR, value=f"=SUMIFS({R_REM},{crit})")
+            ws.cell(row=row, column=cN, value=f"={get_column_letter(cB)}{row}-{get_column_letter(cR)}{row}")
+            for c in range(1, len(hdr2) + 1):
+                cell = ws.cell(row=row, column=c)
+                cell.font = Font(name=FONT_NAME, size=10, italic=(statut == "Bioréférent"),
+                                 color="7F7F7F" if statut == "Bioréférent" else "000000")
+                cell.border = THIN_BORDER
+                if c >= 6 and c != cQ:
+                    cell.number_format = EUR_FMT
+            for c in (2, 3):
+                ws.cell(row=row, column=c).alignment = Alignment(wrap_text=True, vertical="center")
+        row += 1
+        sous_totaux.append(row)
+        ws.cell(row=row, column=1, value=f"Total {mol}")
+        for c in list(range(6, 6 + nT)) + [cQ, cB, cR, cN]:
+            L = get_column_letter(c)
+            ws.cell(row=row, column=c, value=f"=SUM({L}{debut}:{L}{row - 1})")
+        for c in range(1, len(hdr2) + 1):
+            cell = ws.cell(row=row, column=c)
+            cell.font, cell.fill, cell.border = BOLD_FONT, SUBTOTAL_FILL, THIN_BORDER
+            if c >= 6 and c != cQ:
+                cell.number_format = EUR_FMT
+    tot = row + 1
+    ws.cell(row=tot, column=1, value="TOTAL FUITE")
+    for c in list(range(6, 6 + nT)) + [cQ, cB, cR, cN]:
+        L = get_column_letter(c)
+        ws.cell(row=tot, column=c, value=("=" + "+".join(f"{L}{r}" for r in sous_totaux)) if sous_totaux else 0)
+    for c in range(1, len(hdr2) + 1):
+        cell = ws.cell(row=tot, column=c)
+        cell.font = Font(name=FONT_NAME, bold=True, size=10, color=ROUGE_FUITE)
+        cell.fill, cell.border = TOTAL_FILL, THIN_BORDER
+        if c >= 6 and c != cQ:
+            cell.number_format = EUR_FMT
+    autosize(ws, {"A": 22, "B": 26, "C": 36, "D": 15, "E": 16, "F": 15, "G": 14, "H": 14,
+                  **{get_column_letter(c): 14 for c in range(9, ncol + 1)}})
+    ws.freeze_panes = f"B{h1 + 1}"
 
 
 def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, alliance_pdfs=None,
@@ -2184,8 +2464,9 @@ def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, allia
         # d'onglets de CA / fuite (ils ne contiendraient que des divisions par 0).
         print("  Aucune facture fournie : seuls les onglets biosimilaires et méthodologie sont produits.")
     imputer_remises_biosimilaires(releves_biosim, all_rows)
-    build_sheet_biosimilaires_ocp(wb, releves_biosim,
-                                  biosimilaires_des_factures_directes(releves_biosim, all_rows))
+    info_biosim = build_sheet_biosimilaires_ocp(
+        wb, releves_biosim, biosimilaires_des_factures_directes(releves_biosim, all_rows))
+    build_sheet_fuite_sandoz(wb, info_biosim)
     build_sheet_methodologie(wb)
 
     wb.save(out_path)
