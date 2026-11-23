@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Parser des factures « directes » des laboratoires génériqueurs autres que
-Biogaran : EG LABO et SANDOZ (Teva... à ajouter quand leurs factures seront
-fournies).
+Biogaran : EG LABO, SANDOZ et TEVA.
 
 Les factures EG sont émises par le même prestataire que celles de Biogaran
 (Centre Spécialités Pharmaceutiques, puis Movianto) « pour ordre et pour
@@ -31,7 +30,144 @@ LABORATOIRES = [
     ((r"POUR COMPTE DES LABORATOIRES EG LABO", r"D[ée]nomination sociale\s*:\s*EG LABO"),
      "EG LABO", "EG Direct"),
     ((r"D[ée]nomination sociale\s*:\s*SANDOZ\b",), "SANDOZ", "Sandoz Direct"),
+    ((r"\bTeva Sant[ée]\b", r"\bTEVA SANTE SAS\b"), "TEVA", "Teva Direct"),
 ]
+
+# ---------------------------------------------------------------------------
+# Format Teva : deux mises en page.
+#  - « SAP » (jusqu'à août 2026) : bloc produit sur plusieurs lignes
+#      <désignation>            / <CIP13> / <suite désignation> <code douane 8 ch.>
+#      Lot n° Exp. Date Quantité HTS# (TARIFF)
+#      <qté> <PU brut> <remise>% <PU net> <TVA> % <montant HT>
+#    Total : « Total <qté> <brut HT> <net HT> <TVA> <TTC> ».
+#  - « DigiPA » (depuis septembre 2026, « Rendu lisible de la facture
+#    électronique ») : une ligne par produit
+#      <désignation courte> <qté> <PU brut> € <remise> % <PU net> € <TVA> % <montant> €
+#      puis « EAN 0<CIP13> ». Total : « Total HT <montant> € ».
+#  Dans les deux cas la quantité et le PU brut se touchent (« 1 270,00 » =
+#  1 x 270,00, pas 1 270,00) : on retient le découpage qui vérifie
+#  PU brut x (1 - remise) = PU net.
+#  Avoirs Teva (« Avoir: n° », ristournes additionnelles) : ignorés.
+# ---------------------------------------------------------------------------
+TEVA_SAP_VAL_RE = re.compile(
+    r"^(?P<avant>[\d ]+,\d+)\s+(?P<rem>[\d,]+)%\s+(?P<net>[\d ]*\d,\d+)\s+(?P<tva>[\d.,]+)\s*%\s+"
+    r"(?P<mt>[\d ]*\d,\d+)$")
+TEVA_DIGIPA_VAL_RE = re.compile(
+    r"^(?P<des>.*?)\s+(?P<avant>\d[\d ]*,\d+)\s*€\s+(?P<rem>[\d,]+)\s*%\s+(?P<net>[\d ]*\d,\d+)\s*€\s+"
+    r"(?P<tva>[\d.,]+)\s*%\s+(?P<mt>[\d ]*\d,\d+)\s*€$")
+
+
+def _qte_et_brut(avant, rem, net, montant):
+    """« avant » = [fin de désignation] + quantité + PU brut accolés
+    (« 1 270,00 », « 200 1,96 », « 1 5 6,60 » où le 1er « 1 » termine la
+    désignation). Renvoie (nb_jetons_designation, qte, brut) tel que
+    brut x (1 - rem) = net et qte x net = montant, ou (0, None, None)."""
+    toks = avant.split()
+    for debut in range(0, len(toks) - 1):
+        for k in range(debut + 1, len(toks)):
+            try:
+                qte = int("".join(toks[debut:k]))
+                brut = _num_fr("".join(toks[k:]))
+            except ValueError:
+                continue
+            if (qte > 0 and abs(brut * (1 - rem / 100) - net) <= 0.011
+                    and abs(qte * net - montant) <= max(0.02, qte * 0.0051)):
+                return debut, qte, brut
+    return 0, None, None
+
+
+def _ligne_teva(cip, libelle, qte, brut, rem, net, tva, montant):
+    ca_ppht = round(qte * brut, 2)
+    return {"cip13": cip, "libelle": libelle, "tva": tva, "qte_cdee": qte, "qte_fact": qte,
+            "ppht_unit": brut, "prix_net_unitaire": net, "ca_ppht": ca_ppht, "ca_pght": montant,
+            "taux_remise": rem, "remise_ht": round(ca_ppht - montant, 2)}
+
+
+def _extraire_format_teva(texte, res):
+    lignes_txt = [l.strip() for l in texte.split("\n")]
+    if re.search(r"^Avoir\s*:", texte, re.M):
+        m = re.search(r"Avoir\s*:\s*(\d+)\s+Date Document\s*:\s*(\d{2}[/.]\d{2}[/.]\d{4})", texte)
+        if m:
+            res["num_facture"], res["date_facture"] = m.group(1), m.group(2).replace(".", "/")
+        res["type_document"] = "avoir_ignore"
+        return []
+    res["type_document"] = "facture"
+    lignes = []
+    if "DigiPA" in texte or "N° de facture" in texte:
+        m = re.search(r"N° de facture\s+(\d+)", texte)
+        d = re.search(r"Date d.émission\s+(\d{2}/\d{2}/\d{4})", texte)
+        res["num_facture"] = m.group(1) if m else ""
+        res["date_facture"] = d.group(1) if d else ""
+        t = re.search(r"Total HT\s+([\d ]*\d,\d+)\s*€", texte)
+        res["total_net_ht"] = _num_fr(t.group(1)) if t else None
+        for i, l in enumerate(lignes_txt):
+            m = TEVA_DIGIPA_VAL_RE.match(l)
+            if not m:
+                continue
+            rem, net, mt = _num_fr(m.group("rem")), _num_fr(m.group("net")), _num_fr(m.group("mt"))
+            # La quantité est le dernier nombre entier de la désignation courte
+            # (« ... 120P1 20 3,13 € ») : on la recolle à « avant » pour le découpage.
+            avant_toks = m.group("avant").split()
+            nb_des, qte, brut = _qte_et_brut(m.group("avant"), rem, net, mt)
+            libelle = " ".join([m.group("des")] + avant_toks[:nb_des])
+            cip = ""
+            for j in range(i + 1, min(i + 6, len(lignes_txt))):
+                me = re.search(r"EAN\s+0?(\d{13})", lignes_txt[j])
+                if me:
+                    cip = me.group(1)
+                    break
+            if qte is None:
+                res["controles"].append(f"ligne non décodée : {l}")
+                continue
+            lignes.append(_ligne_teva(cip, libelle, qte, brut, rem, net, _num_fr(m.group("tva")), mt))
+    else:
+        m = re.search(r"Facture\s*:\s*(\d+)\s+Date Document\s*:\s*(\d{2}[/.]\d{2}[/.]\d{4})", texte)
+        if m:
+            res["num_facture"], res["date_facture"] = m.group(1), m.group(2).replace(".", "/")
+        mt_ = re.search(r"\bTotal\s+([\d ,]+)$", texte, re.M)
+        if mt_:
+            # Groupes de montants : un groupe se termine par un jeton à virgule ;
+            # le net HT est le 3e groupe en partant de la droite.
+            groupes, courant = [], []
+            for tok in mt_.group(1).split():
+                courant.append(tok)
+                if "," in tok:
+                    groupes.append(courant)
+                    courant = []
+            if len(groupes) >= 3:
+                net_toks = groupes[-3]
+                # le 1er groupe colle quantité + brut ; les suivants sont propres
+                res["total_net_ht"] = _num_fr("".join(net_toks))
+        # Zone produits : entre l'en-tête « Désignation CIP Code ... » (+ ligne
+        # « HT ») et « Détails sur le versement ».
+        try:
+            debut = next(i for i, l in enumerate(lignes_txt) if l.startswith("Désignation CIP Code")) + 1
+        except StopIteration:
+            debut = 0
+        fin = next((i for i, l in enumerate(lignes_txt) if l.startswith("Détails sur le versement")),
+                   len(lignes_txt))
+        LOT_RE = re.compile(r"^\S+ \d{1,2} \S+ \d{2} \d+ \d{8}$")   # « TBYC22D 31 mars 28 1 30049000 »
+        designation, cip = [], ""
+        for l in lignes_txt[debut:fin]:
+            if l == "HT" or l.startswith("Lot n°") or LOT_RE.match(l):
+                continue
+            if re.fullmatch(r"\d{13}", l):
+                cip = l
+                continue
+            m = TEVA_SAP_VAL_RE.match(l)
+            if m:
+                rem, net, mt = _num_fr(m.group("rem")), _num_fr(m.group("net")), _num_fr(m.group("mt"))
+                _, qte, brut = _qte_et_brut(m.group("avant"), rem, net, mt)
+                libelle = re.sub(r"\s+\d{8}$", "", " ".join(designation)).strip()
+                if qte is None:
+                    res["controles"].append(f"ligne non décodée : {l}")
+                else:
+                    lignes.append(_ligne_teva(cip, libelle, qte, brut, rem, net,
+                                              _num_fr(m.group("tva")), mt))
+                designation, cip = [], ""
+                continue
+            designation.append(l)
+    return lignes
 
 # Format Sandoz (plateforme Cegedim, différent de Movianto) :
 #   <désignation, parfois sur 2 lignes>
@@ -130,7 +266,8 @@ def identifier_laboratoire(texte):
 def extraire_facture_direct_labo(path_pdf):
     """Renvoie un dict :
       laboratoire, canal, num_facture, date_facture, type_document
-      ("facture" | "avoir_remise" | "avoir_ignore" | "inconnu"), lignes (format commun aux autres
+      ("facture" | "facture_sans_produit" | "avoir_remise" | "avoir_ignore" |
+      "inconnu"), lignes (format commun aux autres
       parsers), avoirs [{code, libelle, montant_ht, mois_concerne}],
       total_net_ht (imprimé ou reconstitué du pied de facture), controles."""
     with pdfplumber.open(path_pdf) as pdf:
@@ -144,7 +281,11 @@ def extraire_facture_direct_labo(path_pdf):
         res["controles"].append("laboratoire émetteur non reconnu")
         return res
 
-    if labo == "SANDOZ":
+    if labo == "TEVA":
+        lignes = _extraire_format_teva(texte, res)
+        if res["type_document"] == "avoir_ignore":
+            return res
+    elif labo == "SANDOZ":
         lignes = _extraire_format_sandoz(texte, res)
         if res["type_document"] == "avoir_ignore":
             return res
@@ -198,7 +339,9 @@ def extraire_facture_direct_labo(path_pdf):
         if bases:
             res["total_net_ht"] = round(sum(bases), 2)
         qm = TOTAL_QTES_RE.search(texte)
-        if res["avoirs"] and not lignes:
+        if not lignes and not res["avoirs"] and res["total_net_ht"] in (0.0, None) and qm:
+            res["type_document"] = "facture_sans_produit"   # ex. brochures gratuites (0,00 €)
+        elif res["avoirs"] and not lignes:
             res["type_document"] = "avoir_remise"
             somme = round(sum(a["montant_ht"] for a in res["avoirs"]), 2)
             if res["total_net_ht"] is not None and abs(somme - res["total_net_ht"]) > 0.005:
@@ -209,6 +352,8 @@ def extraire_facture_direct_labo(path_pdf):
             if qm and int(qm.group(1)) != q:
                 res["controles"].append(f"quantité lignes {q} ≠ TOTAL QTES FACTUREES {qm.group(1)}")
 
+    if res["type_document"] == "inconnu":
+        res["controles"].append("aucune ligne produit ni avoir reconnu : présentation de facture inconnue ?")
     for l in lignes:
         l.update({"offre": labo, "canal": canal,
                   "num_facture": res["num_facture"], "date_facture": res["date_facture"]})

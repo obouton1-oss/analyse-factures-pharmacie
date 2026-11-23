@@ -136,6 +136,74 @@ MOTIF_EXCLUSION_REMISE = "Entrée au répertoire en cours d'année"
 # ne pas les modifier sans mettre à jour les formules.
 EXCL_OUI, EXCL_NON = "Oui", "Non"
 
+# ---------------------------------------------------------------------------
+# Assiette de remise EG LABO (décision pharmacien du 23/11/2026)
+# ---------------------------------------------------------------------------
+# Assiette = produits EG REMBOURSABLES (génériques du répertoire, hybrides,
+# hors répertoire remboursés), tous canaux, MOINS les catégories ci-dessous
+# lorsqu'elles sont remboursables. Règle par mots-clés sur le libellé facture
+# et la dénomination BDPM (accents retirés, majuscules) : une nouvelle
+# présentation est donc couverte sans mise à jour de liste.
+GENERIQUEUR_EG = "EG LABO"
+EXCLUSIONS_ASSIETTE_EG = [
+    # (motif affiché, motifs qui doivent TOUS être présents)
+    ("Calcium vitamine D3 remboursable", (r"CALCIUM", r"D3|COLECALCIF|CHOLECALCIF")),
+    ("Nicotine remboursable", (r"NICOTIN",)),
+]
+
+
+# ---------------------------------------------------------------------------
+# Rattrapage de remise TEVA (décision pharmacien du 23/11/2026)
+# ---------------------------------------------------------------------------
+# Génériques TEVA du répertoire, remboursables, tous canaux (Teva Direct et
+# indirect : OCP, Alliance). Selon le taux de remise facturé, Teva verse une
+# compensation trimestrielle pour atteindre le taux cible :
+#   remise facturée 10 / 20 / 30 % -> cible 39 %
+#   remise facturée 2,5 %          -> cible 12,5 %
+# Compensation attendue = CA brut x taux cible - remise facturée.
+GENERIQUEUR_TEVA = "TEVA"
+TEVA_TAUX_CIBLE = {2.5: 0.125, 10.0: 0.39, 20.0: 0.39, 30.0: 0.39}
+
+
+def palier_teva(r):
+    """Palier de remise facturée (« 2,5 % », « 10 % »...) d'une ligne TEVA
+    éligible au rattrapage, « autre taux » si hors grille, "" si non éligible."""
+    if (r.get("genericqueur") != GENERIQUEUR_TEVA or r.get("type_medicament") != "Générique (répertoire)"
+            or r.get("remboursement") == "Non remboursé (ou non renseigné)"):
+        return ""
+    taux = r.get("taux_remise")
+    if taux is None:
+        return "autre taux"
+    taux = float(taux) * (100 if float(taux) <= 1 else 1)   # 0,025 ou 2,5 selon le parser
+    for palier in TEVA_TAUX_CIBLE:
+        if abs(taux - palier) < 0.05:
+            return f"{palier:g} %".replace(".", ",")
+    return "autre taux"
+
+
+def trimestre_de(periode):
+    if "/" not in (periode or ""):
+        return ""
+    mm, aaaa = periode.split("/")
+    return f"{aaaa} T{(int(mm) - 1) // 3 + 1}"
+
+
+def _sans_accents_maj(t):
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFKD", t or "")
+                   if not unicodedata.combining(c)).upper()
+
+
+def exclusion_assiette_eg(libelle, denomination, remboursement):
+    """Motif d'exclusion de l'assiette EG, ou "" (produit conservé)."""
+    if remboursement == "Non remboursé (ou non renseigné)":
+        return ""
+    texte = _sans_accents_maj(f"{libelle} {denomination}")
+    for motif, regles in EXCLUSIONS_ASSIETTE_EG:
+        if all(re.search(r, texte) for r in regles):
+            return motif
+    return ""
+
 
 def cle_cip13(cip13):
     """Normalise un CIP13 en clé de comparaison : chiffres uniquement.
@@ -304,6 +372,9 @@ def _enrichir_ligne(r, periode, canal, bdpm, brand, is_gen):
         "exclu_base_remise": exclu,
         "motif_exclusion_remise": MOTIF_EXCLUSION_REMISE if exclu else "",
         "detail_exclusion_remise": detail_exclu,
+        "motif_exclusion_eg": (exclusion_assiette_eg(r.get("libelle"), bdpm.denomination(r["cip13"]),
+                                                     remboursement)
+                               if brand == GENERIQUEUR_EG else ""),
     }
 
 
@@ -359,7 +430,7 @@ def enrich_rows_biogaran_direct(pdf_paths, bdpm):
 
 
 def lire_factures_direct_labo(pdf_paths, bdpm):
-    """Canaux « <labo> Direct » (EG LABO, SANDOZ — cf. parser_direct_labo.py).
+    """Canaux « <labo> Direct » (EG LABO, SANDOZ, TEVA — cf. parser_direct_labo.py).
     Renvoie (lignes enrichies, avoirs). Les avoirs sont ignorés pour l'instant
     (liste toujours vide). Le génériqueur est le laboratoire émetteur ; type de
     médicament et remboursement viennent de la BDPM comme pour les autres canaux."""
@@ -371,6 +442,10 @@ def lire_factures_direct_labo(pdf_paths, bdpm):
         for c in f["controles"]:
             print(f"⚠️  {nom} : {c}", file=sys.stderr)
         if f["type_document"] == "inconnu":
+            continue
+        if f["type_document"] == "facture_sans_produit":
+            print(f"  Facture {f['laboratoire']} {f['num_facture']} ({nom}) sans produit facturé "
+                  "(documentation gratuite...) — ignorée")
             continue
         if f["type_document"] == "avoir_ignore":
             print(f"  Avoir {f['laboratoire']} {f['num_facture']} ({nom}) ignoré")
@@ -572,6 +647,10 @@ def build_sheet_detail(wb, all_rows):
         # décaler les colonnes A/D/F/H/J/L/N/R référencées par les formules
         # des onglets de synthèse.
         "Exclu base remise", "Motif exclusion base remise",
+        # Colonnes U / V : exclusion de l'assiette de remise EG LABO.
+        "Exclu assiette EG", "Motif exclusion EG",
+        # Colonnes W / X : rattrapage de remise TEVA.
+        "Palier rattrapage Teva", "Trimestre",
     ]
     ws.append(headers)
     style_header_row(ws, 1, len(headers))
@@ -586,6 +665,10 @@ def build_sheet_detail(wb, all_rows):
             r["fabricant_titulaire"] or "", r["hybride_role"], r["canal"],
             EXCL_OUI if r.get("exclu_base_remise") else EXCL_NON,
             r.get("motif_exclusion_remise", ""),
+            EXCL_OUI if r.get("motif_exclusion_eg") else EXCL_NON,
+            r.get("motif_exclusion_eg", ""),
+            palier_teva(r),
+            trimestre_de(r.get("periode")),
         ])
 
     n = len(all_rows) + 1
@@ -603,7 +686,7 @@ def build_sheet_detail(wb, all_rows):
 
     widths = {"A": 10, "B": 15, "C": 32, "D": 20, "E": 30, "F": 22, "G": 24,
               "H": 16, "I": 9, "J": 9, "K": 12, "L": 12, "M": 10, "N": 12,
-              "O": 35, "P": 26, "Q": 12, "R": 16, "S": 17, "T": 34}
+              "O": 35, "P": 26, "Q": 12, "R": 16, "S": 17, "T": 34, "U": 16, "V": 32, "W": 16, "X": 11}
     autosize(ws, widths)
     ws.freeze_panes = "A2"
     return ws, n
@@ -1143,6 +1226,186 @@ def build_sheet_assiette_remise(wb, all_rows, n_detail):
     return ws
 
 
+def build_sheet_assiette_eg(wb, all_rows, n_detail):
+    """Assiette de remise EG LABO, mois par mois, tous canaux : CA EG par
+    catégorie (répertoire, hybride, autres remboursés, non remboursé), moins
+    les exclusions (calcium D3 et nicotine remboursables), remise facturée et
+    taux pondéré sur l'assiette. Formules sur 'Détail lignes'."""
+    periodes = sorted({r["periode"] for r in all_rows if r.get("genericqueur") == GENERIQUEUR_EG},
+                      key=periode_sort_key)
+    if not periodes:
+        return
+    ws = wb.create_sheet("Assiette remise EG")
+    ws["A1"] = "Assiette de remise EG LABO — détail mensuel, tous canaux"
+    ws["A1"].font = TITLE_FONT
+    ws["A2"] = ("Assiette = produits EG remboursables (génériques du répertoire, hybrides, autres "
+                "remboursés) moins le calcium vitamine D3 et la nicotine remboursables. Les produits non "
+                "remboursés sont hors assiette. Lignes et motifs : colonnes U/V de 'Détail lignes'.")
+    ws["A2"].font = SUBTITLE_FONT
+    D = "'Détail lignes'"
+    rg = lambda c: f"{D}!${c}$2:${c}${n_detail}"
+    PER, LAB, TYP, REM, CA, RMS, EXC, CAN = (rg(c) for c in "ADFHLNUR")
+    NR = "Non remboursé (ou non renseigné)"
+    base = f'{LAB},"{GENERIQUEUR_EG}"'
+    headers = ["Période", "CA EG total (€)", "dont non remboursé — hors assiette (€)",
+               "Générique répertoire remboursable (€)", "Hybride remboursable (€)",
+               "Autres remboursables (€)", "dont exclu : calcium D3 / nicotine remb. (€)",
+               "Assiette retenue (€)", "Remise facturée sur assiette (€)", "Taux de remise pondéré"]
+    hr = 4
+    for i, h in enumerate(headers, start=1):
+        c = ws.cell(row=hr, column=i, value=h)
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    style_header_row(ws, hr, len(headers))
+    ws.row_dimensions[hr].height = 58
+    first = hr + 1
+    for i, per in enumerate(periodes):
+        row = first + i
+        pc = f'{PER},"{per}"'
+        ws.cell(row=row, column=1, value=per)
+        ws.cell(row=row, column=2, value=f"=SUMIFS({CA},{base},{pc})")
+        ws.cell(row=row, column=3, value=f'=SUMIFS({CA},{base},{pc},{REM},"{NR}")')
+        ws.cell(row=row, column=4, value=f'=SUMIFS({CA},{base},{pc},{TYP},"Générique (répertoire)",{REM},"<>{NR}")')
+        ws.cell(row=row, column=5, value=f'=SUMIFS({CA},{base},{pc},{TYP},"Hybride",{REM},"<>{NR}")')
+        ws.cell(row=row, column=6, value=f"=B{row}-C{row}-D{row}-E{row}")
+        ws.cell(row=row, column=7, value=f'=SUMIFS({CA},{base},{pc},{EXC},"{EXCL_OUI}")')
+        ws.cell(row=row, column=8, value=f"=D{row}+E{row}+F{row}-G{row}")
+        ws.cell(row=row, column=9, value=f'=SUMIFS({RMS},{base},{pc},{REM},"<>{NR}",{EXC},"{EXCL_NON}")')
+        ws.cell(row=row, column=10, value=f"=IFERROR(I{row}/H{row},0)")
+    last = first + len(periodes) - 1
+    tot = last + 1
+    ws.cell(row=tot, column=1, value="TOTAL")
+    for col in range(2, 10):
+        L = get_column_letter(col)
+        ws.cell(row=tot, column=col, value=f"=SUM({L}{first}:{L}{last})")
+    ws.cell(row=tot, column=10, value=f"=IFERROR(I{tot}/H{tot},0)")
+    for row in range(first, tot + 1):
+        for col in range(1, len(headers) + 1):
+            c = ws.cell(row=row, column=col)
+            c.font = BOLD_FONT if row == tot else NORMAL_FONT
+            c.border = THIN_BORDER
+            if row == tot:
+                c.fill = TOTAL_FILL
+            if 2 <= col <= 9:
+                c.number_format = EUR_FMT
+        ws.cell(row=row, column=10).number_format = PCT_FMT
+
+    # Assiette par canal
+    canaux = sorted({r["canal"] for r in all_rows if r.get("genericqueur") == GENERIQUEUR_EG})
+    row = tot + 2
+    ws.cell(row=row, column=1, value="Assiette retenue par canal (€)").font = BOLD_FONT
+    row += 1
+    for i, h in enumerate(["Canal", "Assiette retenue (€)", "Remise facturée (€)", "Taux pondéré"], start=1):
+        ws.cell(row=row, column=i, value=h)
+    style_header_row(ws, row, 4)
+    for canal in canaux:
+        row += 1
+        cc = f'{CAN},"{canal}"'
+        ws.cell(row=row, column=1, value=canal)
+        ws.cell(row=row, column=2, value=f'=SUMIFS({CA},{base},{cc},{REM},"<>{NR}",{EXC},"{EXCL_NON}")')
+        ws.cell(row=row, column=3, value=f'=SUMIFS({RMS},{base},{cc},{REM},"<>{NR}",{EXC},"{EXCL_NON}")')
+        ws.cell(row=row, column=4, value=f"=IFERROR(C{row}/B{row},0)")
+        for col in range(1, 5):
+            ws.cell(row=row, column=col).font = NORMAL_FONT
+            ws.cell(row=row, column=col).border = THIN_BORDER
+        ws.cell(row=row, column=2).number_format = EUR_FMT
+        ws.cell(row=row, column=3).number_format = EUR_FMT
+        ws.cell(row=row, column=4).number_format = PCT_FMT
+
+    # Références exclues rencontrées
+    exclues = {}
+    for r in all_rows:
+        if r.get("motif_exclusion_eg"):
+            exclues.setdefault((r["motif_exclusion_eg"], r["cip13"]), r.get("libelle", ""))
+    row += 2
+    ws.cell(row=row, column=1, value="Références EG exclues de l'assiette (rencontrées)").font = BOLD_FONT
+    if not exclues:
+        row += 1
+        ws.cell(row=row, column=1, value="Aucune sur la période.").font = NORMAL_FONT
+    for (motif, cip), lib in sorted(exclues.items()):
+        row += 1
+        ws.cell(row=row, column=1, value=cip).font = NORMAL_FONT
+        ws.cell(row=row, column=2, value=lib).font = NORMAL_FONT
+        ws.cell(row=row, column=4, value=motif).font = NORMAL_FONT
+    autosize(ws, {"A": 22, "B": 16, "C": 18, "D": 18, "E": 16, "F": 16, "G": 20, "H": 16, "I": 18, "J": 14})
+    ws.freeze_panes = f"B{first}"
+
+
+def build_sheet_rattrapage_teva(wb, all_rows, n_detail):
+    """Rattrapage de remise TEVA par trimestre, canal (direct / indirect) et
+    palier de remise facturée : CA brut, remise facturée, taux cible et
+    compensation attendue = CA x cible - remise facturée."""
+    eligibles = [r for r in all_rows if palier_teva(r)]
+    if not eligibles:
+        return
+    ws = wb.create_sheet("Rattrapage Teva")
+    ws["A1"] = "Rattrapage de remise TEVA — compensation attendue par trimestre"
+    ws["A1"].font = TITLE_FONT
+    cibles = ", ".join(f"{p:g} % → {c * 100:g} %".replace(".", ",") for p, c in TEVA_TAUX_CIBLE.items())
+    ws["A2"] = ("Génériques TEVA du répertoire, remboursables, tous canaux. Taux cible selon la remise "
+                f"facturée : {cibles}. Compensation attendue = CA brut × taux cible − remise facturée. "
+                "« Direct » = factures Teva ; « Indirect » = achats via grossiste (OCP, Alliance). "
+                "Les avoirs Teva reçus ne sont pas intégrés : à rapprocher manuellement.")
+    ws["A2"].font = SUBTITLE_FONT
+    D = "'Détail lignes'"
+    rg = lambda c: f"{D}!${c}$2:${c}${n_detail}"
+    CA, RMS, CAN, PAL, TRI = rg("L"), rg("N"), rg("R"), rg("W"), rg("X")
+    trimestres = sorted({trimestre_de(r["periode"]) for r in eligibles})
+    paliers = [f"{p:g} %".replace(".", ",") for p in TEVA_TAUX_CIBLE] + ["autre taux"]
+    headers = ["Trimestre", "Canal", "Remise facturée (palier)", "CA brut (€)", "Remise facturée (€)",
+               "Taux cible", "Remise cible (€)", "Compensation attendue (€)"]
+    hr = 4
+    for i, h in enumerate(headers, start=1):
+        c = ws.cell(row=hr, column=i, value=h)
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    style_header_row(ws, hr, len(headers))
+    ws.row_dimensions[hr].height = 40
+    row = hr
+    lignes_tot = []
+    for t in trimestres:
+        for groupe, crit in (("Direct", f'{CAN},"Teva Direct"'), ("Indirect", f'{CAN},"<>Teva Direct"')):
+            for pal in paliers:
+                n = sum(1 for r in eligibles if trimestre_de(r["periode"]) == t and palier_teva(r) == pal
+                        and ((r["canal"] == "Teva Direct") == (groupe == "Direct")))
+                if not n:
+                    continue
+                row += 1
+                lignes_tot.append(row)
+                base = f'{TRI},"{t}",{crit},{PAL},"{pal}"'
+                ws.cell(row=row, column=1, value=t)
+                ws.cell(row=row, column=2, value=groupe)
+                ws.cell(row=row, column=3, value=pal)
+                ws.cell(row=row, column=4, value=f"=SUMIFS({CA},{base})")
+                ws.cell(row=row, column=5, value=f"=SUMIFS({RMS},{base})")
+                cible = next((c for p, c in TEVA_TAUX_CIBLE.items()
+                              if f"{p:g} %".replace(".", ",") == pal), None)
+                if cible is not None:
+                    ws.cell(row=row, column=6, value=cible)
+                    ws.cell(row=row, column=7, value=f"=D{row}*F{row}")
+                    ws.cell(row=row, column=8, value=f"=MAX(0,G{row}-E{row})")
+                else:
+                    ws.cell(row=row, column=6, value="—")
+                    ws.cell(row=row, column=8, value=0)
+                for col in range(1, len(headers) + 1):
+                    c = ws.cell(row=row, column=col)
+                    c.font = NORMAL_FONT
+                    c.border = THIN_BORDER
+                for col in (4, 5, 7, 8):
+                    ws.cell(row=row, column=col).number_format = EUR_FMT
+                ws.cell(row=row, column=6).number_format = PCT_FMT
+    tot = row + 1
+    ws.cell(row=tot, column=1, value="TOTAL")
+    for col in (4, 5, 7, 8):
+        L = get_column_letter(col)
+        ws.cell(row=tot, column=col, value=f"=SUM({L}{hr + 1}:{L}{row})")
+    for col in range(1, len(headers) + 1):
+        c = ws.cell(row=tot, column=col)
+        c.font, c.fill, c.border = BOLD_FONT, TOTAL_FILL, THIN_BORDER
+        if col in (4, 5, 7, 8):
+            c.number_format = EUR_FMT
+    autosize(ws, {"A": 12, "B": 11, "C": 16, "D": 15, "E": 17, "F": 11, "G": 15, "H": 19})
+    ws.freeze_panes = f"A{hr + 1}"
+
+
 def build_sheet_fuite(wb, all_rows, catalog_biogaran):
     ws = wb.create_sheet("Fuite Biogaran")
     ws["A1"] = "Analyse de fuite — génériques disponibles chez Biogaran achetés ailleurs"
@@ -1330,7 +1593,19 @@ def build_sheet_methodologie(wb):
         "- SANDOZ : factures Sandoz (canal « Sandoz Direct »), contrôlées au centime. Sandoz "
         "n'imprime pas le PFHT (« NaN ») : CA PPHT = montant net facturé, remise non connue. "
         "Les avoirs Sandoz (conditions commerciales) ne sont pas pris en compte.",
-        "- Avoirs EG (« remise additionnelle ») et avoirs Sandoz : ignorés pour l'instant.",
+        "- TEVA : factures Teva Santé (canal « Teva Direct »), deux mises en page (avant / depuis "
+        "septembre 2026), contrôlées au centime.",
+        "- Avoirs EG (« remise additionnelle »), Sandoz et Teva (ristournes) : ignorés pour l'instant.",
+        "",
+        "ASSIETTE DE REMISE EG",
+        "- Produits EG remboursables, tous canaux (génériques du répertoire, hybrides, autres "
+        "remboursés), moins le calcium vitamine D3 et la nicotine remboursables (règle par "
+        "mots-clés : EXCLUSIONS_ASSIETTE_EG). Onglet 'Assiette remise EG'.",
+        "",
+        "RATTRAPAGE TEVA",
+        "- Génériques TEVA du répertoire remboursables, tous canaux. Remise facturée 10/20/30 % → "
+        "cible 39 % ; 2,5 % → cible 12,5 % (TEVA_TAUX_CIBLE). Compensation attendue = CA brut × "
+        "cible − remise facturée, par trimestre, direct / indirect. Onglet 'Rattrapage Teva'.",
         "",
         "BIOSIMILAIRES",
         "- Dans les onglets issus des factures, les biosimilaires ne sont pas distingués : "
@@ -1660,6 +1935,8 @@ def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, allia
         build_sheet_genericqueur(wb, n_detail, labo_fills, genericqueurs)
         build_sheet_type_labo(wb, all_rows, n_detail, periodes, labo_fills)
         build_sheet_assiette_remise(wb, all_rows, n_detail)
+        build_sheet_assiette_eg(wb, all_rows, n_detail)
+        build_sheet_rattrapage_teva(wb, all_rows, n_detail)
         _, n_fuite = build_sheet_fuite(wb, all_rows, catalog_biogaran)
         build_sheet_resume(wb, all_rows, n_fuite)
     else:

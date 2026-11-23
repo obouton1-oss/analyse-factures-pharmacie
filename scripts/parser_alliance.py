@@ -96,6 +96,9 @@ ALLIANCE_LABO_KEYWORDS = {
     "STADA": [" stada"],
     "AUROBINDO": [" aur ", " aurobindo"],
     "SUN PHARMA": [" sun "],
+    # EG LABO : « FEBUXOSTAT EG CPR 80MG 28 », « PREGABALIN EG LABO ... »
+    # (mot « EG » isolé, vérifié sur 400 factures Alliance archivées).
+    "EG LABO": [" eg "],
 }
 
 

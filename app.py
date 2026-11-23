@@ -248,7 +248,7 @@ def _normaliser(texte):
 
 def detecter_canal(contenu):
     """Canal du PDF : "ocp" (récap BO-OFFREM), "biosim_ocp" (relevé OCP des
-    achats de biosimilaires), "direct_labo" (factures directes EG LABO, SANDOZ),
+    achats de biosimilaires), "direct_labo" (factures directes EG LABO, SANDOZ, TEVA),
     "alliance", "biogaran",
     "avoir_biogaran" (avoir RDP, non pris en compte), ou None s'il n'est pas
     reconnu (facture OCP individuelle, EMAC, autre fournisseur, PDF
@@ -267,8 +267,8 @@ def detecter_canal(contenu):
     if "ALLIANCE HEALTHCARE" in t:
         return "alliance"
     if ("POUR COMPTE DES LABORATOIRES EG LABO" in t or "DENOMINATION SOCIALE : EG LABO" in t
-            or "DENOMINATION SOCIALE : SANDOZ" in t):
-        return "direct_labo"  # factures et avoirs EG LABO / SANDOZ en direct
+            or "DENOMINATION SOCIALE : SANDOZ" in t or "TEVA SANTE" in t):
+        return "direct_labo"  # factures et avoirs EG LABO / SANDOZ / TEVA en direct
     if "BIOGARAN" in t and "RECAPITULATIF DES REMISES" in t:
         return "avoir_biogaran"
     if ("BIOGARAN" in t and "AU NOM ET POUR LE COMPTE DE" in t) \
@@ -317,6 +317,27 @@ def uploader_dossiers(label, key):
 
 
 # ---------------------------------------------------------------------------
+# Liste des documents à fournir
+# ---------------------------------------------------------------------------
+with st.expander("📄 Documents à fournir pour un rapport complet", expanded=False):
+    st.markdown("""
+| Document | Ce qu'il alimente dans le rapport | Remarque |
+|---|---|---|
+| **OCP — récapitulatif mensuel des offres** (« BO-OFFREM ») | CA OCP par offre et par génériqueur, remises, fuite Biogaran, assiettes Biogaran et EG, rattrapage Teva (indirect) | Un par mois |
+| **OCP — relevé des achats de produits biosimilaires** (« BIOST ») | Onglet *Biosimilaires* (achats OCP avec ou sans offre) | Cumul depuis janvier : seul le plus récent de l'année est utilisé |
+| **Alliance Healthcare — factures** | CA Alliance par génériqueur, fuite, assiettes Biogaran et EG, rattrapage Teva (indirect) | Les relevés mensuels Alliance sont ignorés automatiquement |
+| **Biogaran — factures directes** (CSP / Movianto) | Canal *Biogaran Direct*, assiette de remise Biogaran | |
+| **EG LABO — factures directes** (CSP / Movianto) | Canal *EG Direct*, assiette de remise EG | |
+| **Teva Santé — factures directes** | Canal *Teva Direct*, rattrapage de remise Teva (direct) | |
+| **Sandoz — factures directes** | Canal *Sandoz Direct*, onglet *Biosimilaires* | |
+
+**Inutiles (reconnus et ignorés)** : factures OCP individuelles, relevés EMAC, relevés de compte OCP, avoirs Biogaran (RDP), EG, Teva et Sandoz.
+
+Pour un rapport complet sur une période, fournir **tous** les documents de la période pour chaque canal utilisé : un mois manquant chez un fournisseur fait baisser son CA sans message d'erreur.
+""")
+
+
+# ---------------------------------------------------------------------------
 # Dépôt global : un ou plusieurs dossiers, tri automatique par canal
 # ---------------------------------------------------------------------------
 st.markdown('<div class="canal-card" style="--accent:#1F3864">', unsafe_allow_html=True)
@@ -324,7 +345,7 @@ st.markdown("### 📂 Dépôt des factures — tous canaux, tous mois")
 st.markdown(
     '<div class="sub">Clique sur <b>Upload directories</b> et choisis le dossier qui contient tous tes '
     'dossiers mensuels (par ex. « Factures 2026 ») : tous les sous-dossiers sont lus d\'un coup. '
-    'Chaque PDF est reconnu automatiquement (récap OCP, relevé OCP des biosimilaires, Alliance, Biogaran Direct, factures directes EG ou Sandoz) d\'après son contenu, '
+    'Chaque PDF est reconnu automatiquement (récap OCP, relevé OCP des biosimilaires, Alliance, Biogaran Direct, factures directes EG, Sandoz ou Teva) d\'après son contenu, '
     'peu importe le dossier où il est rangé. Le bouton <b>+</b> permet ensuite d\'ajouter un autre dossier ; '
     'les <b>+</b> sous les compteurs ajoutent des PDF directement dans un canal.</div>',
     unsafe_allow_html=True,
@@ -402,7 +423,7 @@ for cle, val, lbl in (
     ("ocp", len(ocp_files), "📋 Récaps OCP"),
     ("alliance", len(alliance_files), "🏥 PDF Alliance"),
     ("biogaran", len(biogaran_files), "💊 Factures Biogaran"),
-    ("direct_labo", len(direct_files), "🏭 Directs labos (EG, Sandoz)"),
+    ("direct_labo", len(direct_files), "🏭 Directs labos (EG, Sandoz, Teva)"),
     ("ignores", len(ignores), "Ignorés"),
 ):
     bulles[cle].markdown(f"""

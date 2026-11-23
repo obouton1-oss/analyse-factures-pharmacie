@@ -68,6 +68,7 @@ class BDPM:
         self.cip13_to_cis = {}
         self.cip13_to_taux_remb = {}
         self.cis_to_titulaire = {}
+        self.cis_to_denomination = {}
         self.cis_to_type_generique = {}  # 0=princeps, 1/2/4=générique
         self.cis_to_groupe = {}          # CIS -> code groupe générique
         self.groupe_to_cis = {}          # code groupe -> set(CIS)
@@ -93,6 +94,11 @@ class BDPM:
                 cis, cip13, taux_remb = cols[0], cols[6], cols[8]
                 self.cip13_to_cis[cip13] = cis
                 self.cip13_to_taux_remb[cip13] = taux_remb.strip() or None
+
+    def denomination(self, cip13):
+        """Dénomination BDPM de la spécialité (ex. « CALCIUM VITAMINE D3 EG
+        500 mg/400 UI, comprimé à croquer ou à sucer »), ou ""."""
+        return self.cis_to_denomination.get(self.cip13_to_cis.get(cip13), "")
 
     def taux_groupe_generique(self, cip13):
         """Taux de remboursement commun aux AUTRES présentations du groupe
@@ -122,6 +128,7 @@ class BDPM:
                 if len(cols) < 11:
                     continue
                 cis, titulaire = cols[0], cols[10]
+                self.cis_to_denomination[cis] = cols[1].strip()
                 if titulaire.strip():
                     self.cis_to_titulaire[cis] = _normalise(titulaire)
 
