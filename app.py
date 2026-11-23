@@ -374,9 +374,9 @@ with st.expander("📄 Documents à fournir pour un rapport complet", expanded=F
     st.markdown("""
 | Document | Ce qu'il alimente dans le rapport | Remarque |
 |---|---|---|
-| **OCP — récapitulatif mensuel des offres** (« BO-OFFREM ») | CA OCP par offre et par génériqueur, remises, fuite Biogaran, assiettes Biogaran et EG, rattrapage Teva (indirect) | Un par mois |
-| **OCP — relevé des achats de produits biosimilaires** (« BIOST ») | Onglet *Biosimilaires* (achats OCP avec ou sans offre) | Cumul depuis janvier : seul le plus récent de l'année est utilisé |
-| **Alliance Healthcare — factures** | CA Alliance par génériqueur, fuite, assiettes Biogaran et EG, rattrapage Teva (indirect) | Les relevés mensuels Alliance sont ignorés automatiquement |
+| **OCP — récapitulatif mensuel des offres** (« BO-OFFREM ») | CA OCP par offre et par génériqueur, remises, fuite Biogaran, assiettes Biogaran et EG, rattrapage Teva (grossistes), remises des biosimilaires achetés chez OCP | Un par mois |
+| **OCP — relevé des achats de produits biosimilaires** (« BIOST ») | Onglet *Biosimilaires* (achats OCP avec ou sans offre, part de marché Sandoz) | Cumul depuis janvier : seul le plus récent de l'année est utilisé |
+| **Alliance Healthcare — factures** | CA Alliance par génériqueur, fuite, assiettes Biogaran et EG, rattrapage Teva (grossistes) | Les relevés mensuels Alliance sont ignorés automatiquement |
 | **Biogaran — factures directes** (CSP / Movianto) | Canal *Biogaran Direct*, assiette de remise Biogaran | |
 | **EG LABO — factures directes** (CSP / Movianto) | Canal *EG Direct*, assiette de remise EG | |
 | **Teva Santé — factures directes** | Canal *Teva Direct*, rattrapage de remise Teva (direct) | |
