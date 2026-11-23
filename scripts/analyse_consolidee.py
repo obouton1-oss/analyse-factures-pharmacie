@@ -87,6 +87,8 @@ OFFRE_TO_GENERIQUEUR = {
     "OASE MOVICOL OTC RSF": ("NORGINE (OTC)", False),
     "DEAL EMBECTA OF3_27,35% RSF": ("EMBECTA (dispositifs)", False),
     "PROMO DAYANG RSF": ("DAYANG (parapharmacie)", False),
+    # ISN = Ineldea Santé Naturelle (vu sur INELDEA ENDOMELIA, recap juin 2026)
+    "PROMO ISN RSF": ("INELDEA (parapharmacie)", False),
     "NESTLE PRIVILEGE AMBASS 2026 OFC RSF": ("NESTLE (nutrition)", False),
     "SIGVARIS CIBLEE 38% RSF": ("SIGVARIS (dispositifs)", False),
     "SIGVARIS DYNAVEN CIBLEE 56% RSF": ("SIGVARIS (dispositifs)", False),
