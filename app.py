@@ -11,8 +11,10 @@ Lancement :
 L'app ne fait qu'appeler build_report() de scripts/analyse_consolidee.py — la
 logique d'analyse elle-même (parsers, règles métier) ne change pas.
 """
+import gc
 import sys
 import tempfile
+import threading
 import shutil
 import traceback
 import unicodedata
@@ -20,7 +22,7 @@ import io
 import re
 import zipfile
 import hashlib
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import contextmanager, redirect_stdout, redirect_stderr
 from datetime import datetime
 from pathlib import Path
 
@@ -198,6 +200,7 @@ k = st.session_state.reset_counter
 
 def nouvelle_analyse():
     st.session_state.reset_counter += 1
+    st.session_state.fichiers_liberes = False
     st.session_state.report_bytes = None
     st.session_state.report_name = None
     st.session_state.log_text = ""
@@ -206,32 +209,51 @@ def nouvelle_analyse():
 
 
 def deplier_fichiers(files):
-    """Retourne une liste de (nom_fichier, contenu_bytes) à partir des
+    """Retourne une liste de (nom_fichier, contenu, clé) à partir des
     fichiers déposés : les PDF sont pris tels quels, les .zip sont dépliés
     (chaque PDF trouvé à l'intérieur est extrait). Les fichiers système macOS
     (__MACOSX, ._xxx) et tout ce qui n'est pas un PDF (.DS_Store, Excel...)
     sont ignorés — utile en dépôt de dossier, où tout le contenu du dossier
     est envoyé. Le nom est réduit au nom de fichier seul (sans le chemin des
     sous-dossiers)."""
+    # Mémoire : un PDF déposé est passé tel quel (le fichier déjà chargé par
+    # Streamlit), lu sans copie au moment voulu (voir octets()). Seuls les PDF extraits
+    # d'un .zip occupent de la mémoire en plus (d'où l'intérêt de déposer des
+    # dossiers plutôt que des .zip). Chaque élément porte aussi une clé stable
+    # (identifiant Streamlit du fichier) pour ne calculer l'empreinte qu'une fois.
     resultat = []
     for f in files or []:
         nom = Path(f.name).name
         if nom.startswith("._"):
             continue
+        cle = getattr(f, "file_id", None) or f"{f.name}:{id(f)}"
         if nom.lower().endswith(".zip"):
             try:
-                with zipfile.ZipFile(io.BytesIO(f.getvalue())) as zf:
+                f.seek(0)
+                with zipfile.ZipFile(f) as zf:
                     for entry in zf.namelist():
                         if not entry.lower().endswith(".pdf"):
                             continue
                         if entry.startswith("__MACOSX") or "/._" in entry or entry.startswith("._"):
                             continue
-                        resultat.append((Path(entry).name, zf.read(entry)))
+                        resultat.append((Path(entry).name, zf.read(entry), f"{cle}/{entry}"))
             except zipfile.BadZipFile:
                 st.warning(f"⚠️ {nom} n'est pas une archive .zip valide, ignoré.")
         elif nom.lower().endswith(".pdf"):
-            resultat.append((nom, f.getvalue()))
+            resultat.append((nom, f, cle))   # le fichier lui-même, lu à la demande
     return resultat
+
+
+@contextmanager
+def octets(contenu):
+    """Accès aux octets d'un PDF : bytes (extrait d'un .zip) ou fichier déposé.
+    Pour un fichier déposé, vue mémoire SANS copie, libérée dès la sortie du
+    bloc (une vue laissée ouverte empêche Streamlit de libérer le fichier)."""
+    if isinstance(contenu, (bytes, bytearray)):
+        yield contenu
+    else:
+        with contenu.getbuffer() as vue:
+            yield vue
 
 
 # Reconnaissance du canal d'un PDF d'après le texte de sa 1re page (accents
@@ -254,7 +276,7 @@ def detecter_canal(contenu):
     reconnu (facture OCP individuelle, EMAC, autre fournisseur, PDF
     illisible...)."""
     try:
-        with pdfplumber.open(io.BytesIO(contenu)) as pdf:
+        with octets(contenu) as b, pdfplumber.open(io.BytesIO(b)) as pdf:
             if not pdf.pages:
                 return None
             t = _normaliser(pdf.pages[0].extract_text() or "")
@@ -294,7 +316,36 @@ def classer_automatiquement(fichiers):
 
 
 def avec_empreinte(fichiers):
-    return [(nom, contenu, hashlib.sha256(contenu).hexdigest()) for nom, contenu in fichiers]
+    """(nom, contenu, clé) -> (nom, contenu, empreinte sha256). L'empreinte
+    est mémorisée par clé : chaque fichier n'est haché qu'une fois par session,
+    pas à chaque clic."""
+    cache = st.session_state.setdefault("empreinte_cache", {})
+    res = []
+    for nom, contenu, cle in fichiers:
+        if cle not in cache:
+            with octets(contenu) as b:
+                cache[cle] = hashlib.sha256(b).hexdigest()
+        res.append((nom, contenu, cache[cle]))
+    return res
+
+
+@st.cache_resource
+def file_attente():
+    """File d'attente commune à tous les utilisateurs de l'appli (même
+    processus) : une seule analyse à la fois, pour ne pas dépasser la mémoire
+    allouée par Streamlit Cloud ; les suivantes attendent leur tour."""
+    return {"verrou": threading.Lock(), "mutex": threading.Lock(), "inscrits": 0}
+
+
+def liberer_memoire():
+    """Après une analyse réussie : nouvelles clés de zones de dépôt (Streamlit
+    libère les fichiers déposés au rechargement), vidage des caches de
+    session, ramasse-miettes Python."""
+    st.session_state.reset_counter += 1
+    st.session_state.pop("canal_cache", None)
+    st.session_state.pop("empreinte_cache", None)
+    st.session_state.fichiers_liberes = True
+    gc.collect()
 
 
 def uploader_dossiers(label, key):
@@ -477,10 +528,30 @@ def parse_kpis(log_text):
     return kpis
 
 
+tour = False
 if generer:
     if total_fichiers == 0:
         st.warning("Aucune facture reconnue : dépose au moins un dossier ou un PDF avant de générer le rapport.")
     else:
+        fa = file_attente()
+        with fa["mutex"]:
+            fa["inscrits"] += 1
+        message = st.empty()
+        try:
+            # Attente de son tour, message mis à jour toutes les 2 s. Si
+            # l'utilisateur ferme la page, l'appel Streamlit suivant
+            # interrompt l'attente et la place est rendue (bloc finally).
+            while not fa["verrou"].acquire(timeout=2):
+                avant = max(1, fa["inscrits"] - 1)
+                message.info(f"⏳ {avant} analyse(s) en cours ou en attente avant la vôtre. "
+                             "Elle démarrera automatiquement : gardez la page ouverte.")
+            tour = True
+            message.empty()
+        finally:
+            if not tour:
+                with fa["mutex"]:
+                    fa["inscrits"] -= 1
+    if generer and total_fichiers and tour:
         with st.spinner("Analyse en cours… (peut prendre plusieurs minutes si beaucoup de factures Alliance)"):
             tmp_dir = Path(tempfile.mkdtemp(prefix="analyse_pharma_"))
             try:
@@ -498,7 +569,8 @@ if generer:
                         while chemin.exists():
                             chemin = dossier / f"{Path(nom).stem}_{n}{Path(nom).suffix}"
                             n += 1
-                        chemin.write_bytes(contenu)
+                        with octets(contenu) as b:
+                            chemin.write_bytes(b)
                         chemins.append(str(chemin))
                     return chemins
 
@@ -527,11 +599,16 @@ if generer:
                 st.session_state.report_bytes = out_path.read_bytes()
                 st.session_state.report_name = f"rapport_pharmacie_{datetime.now():%Y%m%d_%H%M}.xlsx"
                 st.session_state.error_text = None
+                liberer_memoire()
             except Exception:
                 st.session_state.error_text = traceback.format_exc()
                 st.session_state.report_bytes = None
             finally:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
+                fa["verrou"].release()
+                with fa["mutex"]:
+                    fa["inscrits"] -= 1
+                gc.collect()
         st.rerun()
 
 
@@ -545,6 +622,9 @@ if st.session_state.error_text:
 
 if st.session_state.report_bytes:
     st.success("Rapport généré avec succès ✅")
+    if st.session_state.get("fichiers_liberes"):
+        st.caption("🧹 Les fichiers déposés ont été retirés de la mémoire après l'analyse. "
+                   "Pour une nouvelle analyse, redéposez vos dossiers.")
 
     kpis = st.session_state.kpis or {}
     kcols = st.columns(4)
