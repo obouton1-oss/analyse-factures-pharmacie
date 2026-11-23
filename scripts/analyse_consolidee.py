@@ -1837,6 +1837,11 @@ def build_sheet_methodologie(wb):
         "le plus récent de chaque année est retenu (cumul annuel, périmètre de molécules "
         "élargi rétroactivement par OCP). Contrôlé à chaque lecture contre les totaux "
         "imprimés du relevé. Non additionné aux autres onglets.",
+        "- Relevés mensuels OCP (« BIOSM ») acceptés aussi : colonnes au mois. Si relevés "
+        "trimestriels et mensuels sont fournis pour une même année, un trimestre est pris au mois "
+        "quand ses 3 relevés mensuels sont présents, sinon dans le relevé trimestriel ; les mois "
+        "postérieurs au relevé trimestriel sont pris dans les mensuels. Contrôles du mensuel : "
+        "qté x prix net = CA net, section molécule = section laboratoire.",
         "- Prix brut / prix remisé : le relevé OCP donne le CA net (PPHT − remise) ; la remise "
         "de chaque produit est retrouvée par CIP13 et trimestre dans les récaps d'offres OCP "
         "(contrôle : total = remise imprimée sur le relevé, écart signalé sinon). CA brut = CA "
@@ -1922,37 +1927,108 @@ def build_sheet_methodologie(wb):
 # ---------------------------------------------------------------------------
 # Biosimilaires — relevé OCP « Achats des produits BIOSIMILAIRES » (BIOST)
 # ---------------------------------------------------------------------------
+def cle_periode_biosim(libelle):
+    """Tri chronologique des périodes de l'onglet Biosimilaires, qui peuvent
+    mêler trimestres (« 2026 T1 ») et mois (« 10/2026 »)."""
+    m = re.fullmatch(r"(\d{4}) T(\d)", libelle or "")
+    if m:
+        return (int(m.group(1)), 3 * int(m.group(2)) - 2, 0)
+    m = re.fullmatch(r"(\d{2})/(\d{4})", libelle or "")
+    if m:
+        return (int(m.group(2)), int(m.group(1)), 1)
+    return (9999, 99, 9)
+
+
 def charger_releves_biosimilaires(pdf_paths):
-    """Lit les relevés BIOST et ne garde, pour chaque année, que le PLUS
-    RÉCENT : chaque relevé est un cumul depuis janvier qui reprend le détail
-    trimestre par trimestre, et OCP y ajoute en cours d'année des molécules
-    rétroactivement (constaté en 2026 : dénosumab, follitropine alfa,
-    ranibizumab absents du relevé T1, présents sur T1 dans le relevé T3).
-    Additionner plusieurs relevés compterait donc deux fois les mêmes achats."""
-    from parser_biosimilaires_ocp import parse_releve_biosimilaires
-    par_annee = {}
+    """Lit les relevés OCP des biosimilaires, trimestriels (BIOST, cumul depuis
+    janvier) et/ou mensuels (BIOSM), et choisit sans double compte :
+
+    - trimestriels : pour chaque année, seul le PLUS RÉCENT est gardé (chaque
+      relevé reprend tout depuis janvier, et OCP y ajoute des molécules
+      rétroactivement : dénosumab, follitropine alfa, ranibizumab absents du
+      relevé T1 2026, présents sur T1 dans le relevé T3) ;
+    - mensuels : un par mois (le plus récemment édité en cas de doublon) ;
+    - si les deux existent pour une même année : un trimestre dont les 3 relevés
+      mensuels sont fournis est pris au mois (plus fin) ; sinon il est pris dans
+      le relevé trimestriel et les mensuels de ce trimestre sont écartés. Les
+      mois postérieurs au relevé trimestriel sont pris dans les mensuels.
+
+    Renvoie (releves, libelle_periode) ; libelle_periode(annee, mois) donne la
+    période (« 2026 T1 » ou « 10/2026 ») sous laquelle classer un achat direct
+    de ce mois, pour rester aligné sur les colonnes du relevé."""
+    from parser_biosimilaires_ocp import lire_releve
+    trim, mens = {}, {}
     for chemin in pdf_paths or []:
-        r = parse_releve_biosimilaires(chemin)
+        r = lire_releve(chemin)
         r["fichier"] = Path(chemin).name
-        if not r["annee"]:
-            print(f"  ⚠️  Relevé biosimilaires illisible (année introuvable) : {r['fichier']}",
+        if not r["annee"] or not r["mois_fin"]:
+            print(f"  ⚠️  Relevé biosimilaires illisible (période introuvable) : {r['fichier']}",
                   file=sys.stderr)
             continue
+        if r["type"] == "mensuel":
+            cle = (r["annee"], r["mois_fin"])
+            garde = mens.get(cle)
+            ed = lambda x: tuple(reversed((x["edition"] or "00/00/00").split("/")))
+            if garde is None or ed(r) > ed(garde):
+                if garde is not None:
+                    print(f"  Relevé biosimilaires mensuel {garde['fichier']} remplacé par "
+                          f"{r['fichier']} (même mois, édition plus récente)")
+                mens[cle] = r
+            else:
+                print(f"  Relevé biosimilaires mensuel {r['fichier']} ignoré : doublon de {garde['fichier']}")
+            continue
         cle = (r["mois_fin"] or 0, r["edition"] or "")
-        garde = par_annee.get(r["annee"])
+        garde = trim.get(r["annee"])
         if garde is None or cle > (garde["mois_fin"] or 0, garde["edition"] or ""):
             if garde is not None:
                 print(f"  Relevé biosimilaires {garde['fichier']} remplacé par le plus récent "
                       f"{r['fichier']} (cumul annuel)")
-            par_annee[r["annee"]] = r
+            trim[r["annee"]] = r
         else:
             print(f"  Relevé biosimilaires {r['fichier']} ignoré : un relevé plus récent "
                   f"de {r['annee']} est fourni ({garde['fichier']})")
-    releves = [par_annee[a] for a in sorted(par_annee)]
+
+    au_mois = set()          # (annee, mois) pris dans un relevé mensuel
+    trim_exclus = set()      # (annee, n° trimestre) remplacés par des mensuels
+    releves = []
+    for annee in sorted({a for a in trim} | {a for a, _ in mens}):
+        q = trim.get(annee)
+        fin_q = q["mois_fin"] if q else 0
+        for (a, m), r in sorted(mens.items()):
+            if a != annee:
+                continue
+            n_t = (m - 1) // 3 + 1
+            complet = all((annee, mm) in mens for mm in range(3 * n_t - 2, 3 * n_t + 1))
+            if m > fin_q or complet:
+                au_mois.add((annee, m))
+                if m <= fin_q:
+                    trim_exclus.add((annee, n_t))
+            else:
+                print(f"  Relevé biosimilaires mensuel {r['fichier']} ignoré : ce mois est déjà "
+                      f"couvert par le relevé trimestriel {q['fichier']} (fournir les 3 mois du "
+                      "trimestre pour un suivi mensuel)")
+        if q:
+            if any(a == annee for a, _ in trim_exclus):
+                q["lignes"] = [l for l in q["lignes"]
+                               if (annee, int(l["trimestre"][-1])) not in trim_exclus]
+                q["recap"] = {}   # le récapitulatif annuel ne correspond plus aux lignes gardées
+            releves.append(q)
+        releves.extend(mens[(a, m)] for a, m in sorted(au_mois) if a == annee)
     for r in releves:
         for c in r["controles"]:
             print(f"  ⚠️  Biosimilaires {r['fichier']} : {c}", file=sys.stderr)
-    return releves
+
+    def libelle_periode(annee, mois):
+        if (annee, mois) in au_mois:
+            return f"{mois:02d}/{annee}"
+        q = trim.get(annee)
+        if q and mois <= q["mois_fin"] and (annee, (mois - 1) // 3 + 1) not in trim_exclus:
+            return f"{annee} T{(mois - 1) // 3 + 1}"
+        if any(a == annee for a, _ in au_mois):
+            return f"{mois:02d}/{annee}"
+        return f"{annee} T{(mois - 1) // 3 + 1}"
+
+    return releves, libelle_periode
 
 
 def _marque(designation):
@@ -2000,6 +2076,7 @@ def imputer_remises_biosimilaires(releves, all_rows):
     for r in all_rows:
         if r.get("canal") == "OCP" and r.get("remise_ht"):
             remises[(cle_cip13(r["cip13"]), trimestre_de(r["periode"]))] += r["remise_ht"]
+            remises[(cle_cip13(r["cip13"]), r["periode"])] += r["remise_ht"]
     for rel in releves:
         total = 0.0
         for l in rel["lignes"]:
@@ -2007,7 +2084,9 @@ def imputer_remises_biosimilaires(releves, all_rows):
             l["remise"] = rem
             l["ca_brut"] = round(l["ca_net"] + rem, 2)
             total += rem
-        attendu = sum((v or {}).get("remise") or 0 for v in (rel.get("recap") or {}).values())
+        if not rel.get("recap"):
+            continue   # relevé mensuel (ou trimestriel tronqué) : pas de total imprimé à comparer
+        attendu = sum((v or {}).get("remise") or 0 for v in rel["recap"].values())
         if abs(total - attendu) > 0.05:
             print(f"  ⚠️  Biosimilaires {rel['fichier']} : remises retrouvées dans les récaps OCP "
                   f"{total:,.2f} € pour {attendu:,.2f} € imprimés sur le relevé — récap OCP d'un mois "
@@ -2015,7 +2094,7 @@ def imputer_remises_biosimilaires(releves, all_rows):
                   file=sys.stderr)
 
 
-def biosimilaires_des_factures_directes(releves, all_rows):
+def biosimilaires_des_factures_directes(releves, all_rows, libelle_periode=None):
     """Lignes des factures directes (canaux « ... Direct » hors Biogaran) qui
     sont des biosimilaires / bioréférents. Identification par la MARQUE (1er
     mot de la désignation : HYRIMOZ, ZIEXTENZO...) rapprochée des produits du
@@ -2036,7 +2115,8 @@ def biosimilaires_des_factures_directes(releves, all_rows):
         res.append({
             "molecule": l["molecule"], "statut": l["statut"], "laboratoire": l["laboratoire"],
             "designation": r["libelle"], "cip13": r["cip13"],
-            "trimestre": f"{aaaa} T{(int(mm) - 1) // 3 + 1}",
+            "trimestre": (libelle_periode(int(aaaa), int(mm)) if libelle_periode
+                          else f"{aaaa} T{(int(mm) - 1) // 3 + 1}"),
             "qte": r["qte_fact"], "ca_pght": None,
             "ca_brut": round(r["ca_ppht"], 2), "remise": round(r["remise_ht"], 2),
             "ca_net": round(r["ca_ppht"] - r["remise_ht"], 2),
@@ -2065,7 +2145,8 @@ def _mise_en_forme_tableau(ws, premiere, total, ncols, cols_eur, cols_pct):
 def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
     """Onglet « Biosimilaires » : par molécule (CA brut, remise, CA remisé,
     part biosimilaire, part de marché Sandoz), part de marché Sandoz par
-    trimestre, par laboratoire, puis détail produit x trimestre. Sources :
+    période, par laboratoire, puis détail produit x période (période = trimestre
+    ou mois selon les relevés OCP fournis). Sources :
     relevé OCP (achats OCP) + factures directes des laboratoires. Synthèses en
     formules SUMIFS sur le détail du même onglet."""
     lignes_directes = lignes_directes or []
@@ -2078,7 +2159,7 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
     for l in lignes:   # relevé sans récap OCP imputé : brut = net
         l.setdefault("remise", 0.0)
         l.setdefault("ca_brut", l["ca_net"])
-    trimestres = sorted({l["trimestre"] for l in lignes})
+    trimestres = sorted({l["trimestre"] for l in lignes}, key=cle_periode_biosim)
     molecules = sorted({l["molecule"] for l in lignes})
     labos = sorted({l["laboratoire"] for l in lignes})
     P = LABO_PARTENAIRE_BIOSIM
@@ -2088,15 +2169,18 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
     ws["A1"] = "Biosimilaires et bioréférents — achats OCP et achats directs"
     ws["A1"].font = TITLE_FONT
     sources = " ; ".join(
-        f"{r['fichier']} (cumul janvier → mois {r['mois_fin']:02d}/{r['annee']}, édité le {r['edition']})"
+        (f"{r['fichier']} (mensuel {r['mois_fin']:02d}/{r['annee']}, édité le {r['edition']})"
+         if r.get("type") == "mensuel" else
+         f"{r['fichier']} (cumul janvier → mois {r['mois_fin']:02d}/{r['annee']}, édité le {r['edition']})")
         for r in releves) or "aucun relevé fourni"
     canaux_directs = sorted({l["source"] for l in lignes_directes})
     ws["A2"] = ("Sources : relevé OCP « Achats des produits BIOSIMILAIRES » — " + sources + ". "
                 + (f"Factures directes ({', '.join(canaux_directs)}) : montants facturés, "
-                   "trimestre de la date de facture, produit identifié par sa marque dans le relevé OCP. "
+                   "période (mois ou trimestre, comme le relevé) de la date de facture, produit "
+                   "identifié par sa marque dans le relevé OCP. "
                    if canaux_directs else "")
                 + "CA brut = prix d'achat avant remise (OCP : PPHT ; direct : PFHT facturé) ; "
-                "remise OCP retrouvée par CIP et trimestre dans les récaps d'offres OCP ; CA remisé = "
+                "remise OCP retrouvée par CIP et période dans les récaps d'offres OCP ; CA remisé = "
                 "CA brut − remise. Parts biosimilaire et " + p_nom + " calculées sur le CA brut, "
                 "tous laboratoires d'une même molécule (biosimilaires et bioréférent). Les montants "
                 "du relevé OCP ne sont PAS additionnés aux autres onglets ; les achats directs figurent "
@@ -2117,7 +2201,7 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
     def rng(col):
         return f"${col}${first_det}:${col}${last_det}"
     # Détail : A Molécule, B Statut, C Laboratoire, D Désignation, E CIP13,
-    # F Trimestre, G Qté, H CA PGHT, I CA brut, J Remise, K CA remisé, L Source
+    # F Période (trimestre ou mois), G Qté, H CA PGHT, I CA brut, J Remise, K CA remisé, L Source
     R_MOL, R_STAT, R_LAB, R_TRIM, R_QTE = rng("A"), rng("B"), rng("C"), rng("F"), rng("G")
     R_BRUT, R_REM, R_NET = rng("I"), rng("J"), rng("K")
 
@@ -2163,7 +2247,7 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
     _barre(ws, f"K{h1 + 1}:K{t1}", TEAL)
 
     # --- 2. Part de marché du partenaire par trimestre -------------------
-    _titre_section(ws, h2 - 1, f"2. Part de marché {p_nom} par molécule et par trimestre "
+    _titre_section(ws, h2 - 1, f"2. Part de marché {p_nom} par molécule et par période "
                                f"(CA brut {p_nom} / CA brut de la molécule ; vide = aucun achat ; — = aucun produit {p_nom})",
                    max(11, 4 + nT), TEAL)
     headers2 = ["Molécule"] + [f"Part {p_nom} {t}" for t in trimestres] + [
@@ -2249,13 +2333,14 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
     _barre(ws, f"{get_column_letter(cP)}{h3 + 1}:{get_column_letter(cP)}{t3 - 1}", "5B9BD5")
 
     # --- 4. Détail produit x trimestre ------------------------------------
-    _titre_section(ws, h4 - 1, f"4. Détail par produit et par trimestre (lignes {p_nom} surlignées)", 12)
-    headers_d = ["Molécule", "Statut", "Laboratoire", "Désignation", "CIP13", "Trimestre",
+    _titre_section(ws, h4 - 1, f"4. Détail par produit et par période (lignes {p_nom} surlignées)", 12)
+    headers_d = ["Molécule", "Statut", "Laboratoire", "Désignation", "CIP13", "Période",
                  "Qté", "CA PGHT (€)", "CA brut (€)", "Remise (€)", "CA remisé (€)", "Source"]
     for i, h in enumerate(headers_d, start=1):
         ws.cell(row=h4, column=i, value=h)
     style_header_row(ws, h4, len(headers_d))
-    for k, l in enumerate(sorted(lignes, key=lambda x: (x["molecule"], x["statut"], x["designation"], x["trimestre"]))):
+    for k, l in enumerate(sorted(lignes, key=lambda x: (x["molecule"], x["statut"], x["designation"],
+                                                         cle_periode_biosim(x["trimestre"])))):
         row = first_det + k
         vals = [l["molecule"], l["statut"], l["laboratoire"], l["designation"], l["cip13"],
                 l["trimestre"], l["qte"], l["ca_pght"], l["ca_brut"], l["remise"],
@@ -2433,7 +2518,7 @@ def build_sheet_fuite_sandoz(wb, info):
 def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, alliance_pdfs=None,
                  biosimilaires_ocp_pdfs=None, direct_labo_pdfs=None):
     bdpm = BDPM(data_dir)
-    releves_biosim = charger_releves_biosimilaires(biosimilaires_ocp_pdfs)
+    releves_biosim, libelle_periode_biosim = charger_releves_biosimilaires(biosimilaires_ocp_pdfs)
     all_rows = enrich_rows(pdf_paths, bdpm, biogaran_direct_pdfs=biogaran_direct_pdfs, alliance_pdfs=alliance_pdfs)
     rows_direct, _ = lire_factures_direct_labo(direct_labo_pdfs, bdpm)
     all_rows.extend(rows_direct)
@@ -2465,7 +2550,8 @@ def build_report(pdf_paths, data_dir, out_path, biogaran_direct_pdfs=None, allia
         print("  Aucune facture fournie : seuls les onglets biosimilaires et méthodologie sont produits.")
     imputer_remises_biosimilaires(releves_biosim, all_rows)
     info_biosim = build_sheet_biosimilaires_ocp(
-        wb, releves_biosim, biosimilaires_des_factures_directes(releves_biosim, all_rows))
+        wb, releves_biosim,
+        biosimilaires_des_factures_directes(releves_biosim, all_rows, libelle_periode_biosim))
     build_sheet_fuite_sandoz(wb, info_biosim)
     build_sheet_methodologie(wb)
 

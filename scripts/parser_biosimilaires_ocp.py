@@ -44,9 +44,15 @@ def _num(s):
 
 
 def est_releve_biosimilaires(texte_page1):
-    """Reconnaissance du document (1re page)."""
+    """Reconnaissance du document (1re page) : relevé trimestriel en cumul
+    annuel (code BIOST) ou relevé mensuel (code BIOSM)."""
     t = (texte_page1 or "").upper()
-    return "PRODUITS BIOSIMILAIRES" in t and "BIOST" in t
+    return "PRODUITS BIOSIMILAIRES" in t and ("BIOST" in t or "BIOSM" in t)
+
+
+def est_releve_mensuel(texte_page1):
+    t = (texte_page1 or "").upper()
+    return "BIOSM" in t and "ACHATS MENSUELS" in t
 
 
 def _lignes(page):
@@ -179,6 +185,7 @@ def parse_releve_biosimilaires(pdf_path):
                             "cip13": cip,
                             "statut": "Biosimilaire" if statut == "BIOSIMILAIRE" else "Bioréférent",
                             "trimestre": trim,
+                            "periode": trim,
                             "ca_net": v.get("ca_net", 0.0),
                             "ca_pght": v.get("ca_pght", 0.0),
                             "qte": int(v.get("qte", 0)),
@@ -222,17 +229,119 @@ def parse_releve_biosimilaires(pdf_path):
         controles.append("Récapitulatif de la période introuvable : contrôle des totaux impossible")
 
     return {
+        "type": "trimestriel",
         "annee": annee, "mois_fin": mois_fin, "edition": edition,
         "lignes": lignes_mol, "totaux_lignes": totaux, "recap": recap,
         "controles": controles,
     }
 
 
+# ---------------------------------------------------------------------------
+# Relevé MENSUEL (code BIOSM) : « Achats mensuels des Produits BIOSIMILAIRES »
+# ---------------------------------------------------------------------------
+# Une page « Par Molécule » puis « Par Laboratoire », une ligne par produit :
+#   CIP13  Désignation  [Fabricant]  BIOSIMILAIRE|BIOREFERENT  TVA%  Qté cdée
+#   Qté fact  Prix net unitaire  CA PGHT  Poids%  CA Net total
+# (le fabricant n'est imprimé que dans la section molécule, parfois collé au
+# type : « FRESENIUS KABI FRANCBIOSIMILAIRE »). Pas de récapitulatif : les
+# contrôles portent sur qté x prix net = CA net et sur l'égalité des deux
+# sections.
+_NUM = r"-?\d{1,3}(?: \d{3})*,\d{2}"
+RE_LIGNE_MENSUELLE = re.compile(
+    r"^(\d{13}) (.+?)\s*(BIOSIMILAIRE|BIOREFERENT) (\d+,\d+%) (-?\d+) (-?\d+) "
+    rf"({_NUM}) ({_NUM}) (\d+,\d+%) ({_NUM})$")
+RE_MOIS_MENSUEL = re.compile(r"^(\w+) (\d{4}) - Par (Mol[ée]cule|Laboratoire)", re.IGNORECASE)
+ENTETES_MENSUEL = ("Poids", "Taux Qté", "CIP Produit", "CIP13 ", "______", "BIOSM", "Edité le",
+                   "Achats mensuels", "ÉTABLISSEMENT", "Centre d'appel", "Siège Social", "582 137",
+                   "PHOENIX OCP")
+
+
+def parse_releve_mensuel(pdf_path):
+    """Même structure que parse_releve_biosimilaires(), avec type="mensuel",
+    mois_fin = mois du relevé et, pour chaque ligne, periode = "MM/AAAA"."""
+    par_mol, par_lab = [], []
+    annee = mois = edition = None
+    section = groupe = None
+    precedente = ""
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            for ligne in (page.extract_text() or "").splitlines():
+                ligne = ligne.strip()
+                if edition is None:
+                    m = re.search(r"Edit[ée] le : (\d\d/\d\d/\d\d)", ligne)
+                    if m:
+                        edition = m.group(1)
+                m = RE_MOIS_MENSUEL.match(ligne)
+                if m:
+                    mois = MOIS.get(m.group(1).upper(), mois)
+                    annee = int(m.group(2))
+                    section = "molecule" if m.group(3).upper().startswith("MOL") else "labo"
+                    precedente = ligne
+                    continue
+                if ligne == "Poids":
+                    # le nom de la molécule / du laboratoire précède l'en-tête
+                    groupe = precedente
+                    continue
+                m = RE_LIGNE_MENSUELLE.match(ligne)
+                if m and section:
+                    cip, texte, statut = m.group(1), m.group(2), m.group(3)
+                    l = {"cip13": cip, "texte": texte,
+                         "statut": "Biosimilaire" if statut == "BIOSIMILAIRE" else "Bioréférent",
+                         "qte": int(m.group(6)), "prix_net": _num(m.group(7)),
+                         "ca_pght": _num(m.group(8)), "ca_net": _num(m.group(10)),
+                         "groupe": groupe}
+                    (par_mol if section == "molecule" else par_lab).append(l)
+                if not ligne.startswith(ENTETES_MENSUEL):
+                    precedente = ligne
+
+    controles = []
+    if not (annee and mois):
+        controles.append("Mois du relevé introuvable")
+    labo = {l["cip13"]: l for l in par_lab}
+    periode = f"{mois:02d}/{annee}" if annee and mois else ""
+    lignes = []
+    for l in par_mol:
+        lab = labo.get(l["cip13"])
+        if lab is None:
+            controles.append(f"CIP {l['cip13']} : laboratoire non trouvé dans la section « Par Laboratoire »")
+        if abs(l["qte"] * l["prix_net"] - l["ca_net"]) > 0.01 * abs(l["qte"]) + 0.02:
+            controles.append(f"CIP {l['cip13']} : qté x prix net {l['qte'] * l['prix_net']:.2f} "
+                             f"≠ CA net {l['ca_net']:.2f}")
+        lignes.append({
+            "molecule": (l["groupe"] or "").replace("_", " "),
+            "designation": lab["texte"] if lab else l["texte"],
+            "cip13": l["cip13"], "statut": l["statut"],
+            "trimestre": periode, "periode": periode,
+            "ca_net": l["ca_net"], "ca_pght": l["ca_pght"], "qte": l["qte"],
+            "laboratoire": (lab["groupe"] if lab else "") or "",
+        })
+    tot_mol = round(sum(l["ca_net"] for l in par_mol), 2)
+    tot_lab = round(sum(l["ca_net"] for l in par_lab), 2)
+    if abs(tot_mol - tot_lab) > 0.02:
+        controles.append(f"CA net section molécule {tot_mol:.2f} ≠ section laboratoire {tot_lab:.2f}")
+    if not lignes:
+        controles.append("Aucune ligne produit lue")
+    return {
+        "type": "mensuel",
+        "annee": annee, "mois_fin": mois, "edition": edition,
+        "lignes": lignes, "totaux_lignes": {}, "recap": {}, "controles": controles,
+    }
+
+
+def lire_releve(pdf_path):
+    """Lit un relevé OCP des biosimilaires, trimestriel (BIOST) ou mensuel (BIOSM)."""
+    with pdfplumber.open(pdf_path) as pdf:
+        p1 = (pdf.pages[0].extract_text() or "") if pdf.pages else ""
+    if est_releve_mensuel(p1):
+        return parse_releve_mensuel(pdf_path)
+    return parse_releve_biosimilaires(pdf_path)
+
+
 if __name__ == "__main__":
     for chemin in sys.argv[1:]:
-        r = parse_releve_biosimilaires(chemin)
-        print(f"== {chemin} : {r['annee']} jusqu'au mois {r['mois_fin']}, édité le {r['edition']}")
-        print(f"   {len(r['lignes'])} lignes (produit x trimestre)")
+        r = lire_releve(chemin)
+        print(f"== {chemin} : relevé {r['type']} {r['annee']}, mois {r['mois_fin']}, édité le {r['edition']}")
+        print(f"   {len(r['lignes'])} lignes (produit x période)")
         for s, v in r["recap"].items():
             print(f"   récap {s} : {v}")
         print("   contrôles :", "OK" if not r["controles"] else "")

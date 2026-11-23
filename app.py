@@ -282,8 +282,8 @@ def detecter_canal(contenu):
             t = _normaliser(pdf.pages[0].extract_text() or "")
     except Exception:
         return None
-    if "PRODUITS BIOSIMILAIRES" in t and "BIOST" in t:
-        return "biosim_ocp"   # relevé OCP « Achats des produits BIOSIMILAIRES »
+    if "PRODUITS BIOSIMILAIRES" in t and ("BIOST" in t or "BIOSM" in t):
+        return "biosim_ocp"   # relevé OCP des biosimilaires, trimestriel (BIOST) ou mensuel (BIOSM)
     if "BO-OFFREM" in t:
         return "ocp"
     if "ALLIANCE HEALTHCARE" in t:
@@ -375,7 +375,7 @@ with st.expander("📄 Documents à fournir pour un rapport complet", expanded=F
 | Document | Ce qu'il alimente dans le rapport | Remarque |
 |---|---|---|
 | **OCP — récapitulatif mensuel des offres** (« BO-OFFREM ») | CA OCP par offre et par génériqueur, remises, fuite Biogaran, assiettes Biogaran et EG, rattrapage Teva (grossistes), remises des biosimilaires achetés chez OCP | Un par mois |
-| **OCP — relevé des achats de produits biosimilaires** (« BIOST ») | Onglet *Biosimilaires* (achats OCP avec ou sans offre, part de marché Sandoz) | Cumul depuis janvier : seul le plus récent de l'année est utilisé |
+| **OCP — relevé des achats de produits biosimilaires**, trimestriel (« BIOST ») **ou** mensuel (« BIOSM ») | Onglet *Biosimilaires* (achats OCP avec ou sans offre, part de marché Sandoz) et fuite Sandoz | Trimestriel : cumul depuis janvier, seul le plus récent de l'année est utilisé. Mensuel : un par mois, suivi au mois |
 | **Alliance Healthcare — factures** | CA Alliance par génériqueur, fuite, assiettes Biogaran et EG, rattrapage Teva (grossistes) | Les relevés mensuels Alliance sont ignorés automatiquement |
 | **Biogaran — factures directes** (CSP / Movianto) | Canal *Biogaran Direct*, assiette de remise Biogaran | |
 | **EG LABO — factures directes** (CSP / Movianto) | Canal *EG Direct*, assiette de remise EG | |
@@ -487,8 +487,9 @@ for cle, val, lbl in (
 if entrees:
     if biosim_files:
         st.caption(f"📈 {len(biosim_files)} relevé(s) OCP des biosimilaires reconnu(s) — onglet "
-                   "« Biosimilaires » ; seul le plus récent de chaque année est utilisé "
-                   "(chaque relevé reprend le cumul depuis janvier).")
+                   "« Biosimilaires ». Trimestriels : seul le plus récent de chaque année est utilisé "
+                   "(cumul depuis janvier) ; mensuels : suivi au mois. Les deux formats peuvent être "
+                   "mélangés sans double compte.")
     if doublons:
         st.caption(f"🔁 {doublons} doublon(s) détecté(s) et ignoré(s) (fichier identique déjà déposé).")
     if ignores:
