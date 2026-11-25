@@ -1912,6 +1912,13 @@ def build_sheet_methodologie(wb):
         "(contrôle : total = remise imprimée sur le relevé, écart signalé sinon). CA brut = CA "
         "net + remise. Achats directs : PFHT facturé (prix fabricant, sans marge grossiste, donc "
         "environ 7 % sous le PPHT d'une même boîte achetée chez OCP).",
+        "- Taux de substitution, part de marché et fuite : comptés UNIQUEMENT sur les périodes "
+        "où la substitution par le pharmacien était autorisée. Une période (mois si relevés "
+        "mensuels, trimestre sinon) compte si elle commence à la date d'effet ou après (lendemain "
+        "de la publication de l'arrêté au JO). Dates en 2026 : ustékinumab 15/04/2026, dénosumab "
+        "23/09/2026 ; les autres molécules l'étaient avant 2026. Table SUBSTITUTION_BIOSIM à "
+        "compléter à chaque nouvel arrêté : une molécule absente est signalée à l'analyse et "
+        "exclue des taux.",
         f"- Part de marché {LABO_PARTENAIRE_BIOSIM.capitalize()} (partenariat biosimilaires) = CA brut "
         f"{LABO_PARTENAIRE_BIOSIM.capitalize()} / CA brut de la molécule, biosimilaires et bioréférent, "
         "tous canaux. Les remises versées hors facture (avoirs) ne sont pas prises en compte.",
@@ -2105,6 +2112,64 @@ def _marque(designation):
 
 
 LABO_PARTENAIRE_BIOSIM = "SANDOZ"   # partenariat biosimilaires (parts de marché suivies)
+
+# ---------------------------------------------------------------------------
+# Substitution des biosimilaires par le pharmacien d'officine
+# ---------------------------------------------------------------------------
+# Taux de substitution (part biosimilaire), part de marché du partenaire et
+# fuite ne sont calculés que sur les périodes où la substitution était
+# légalement possible (décision pharmacien du 25/11/2026) : une période (mois
+# ou trimestre, selon le relevé OCP) compte si elle COMMENCE à la date d'effet
+# ou après (option « stricte » : aucun achat antérieur à l'autorisation).
+# Date d'effet = lendemain de la publication de l'arrêté au Journal officiel.
+# Mot-clé = début du nom de molécule du relevé OCP.
+# À COMPLÉTER à chaque nouvel arrêté (liste fixée par arrêté du ministre, art.
+# L. 5125-23-2 CSP) : une molécule absente de cette table est signalée et
+# traitée comme non substituable.
+SUBSTITUTION_BIOSIM = [
+    # (mot-clé molécule, date d'effet AAAA-MM-JJ, texte affiché « substituable depuis »)
+    ("FILGRASTIM", "2025-01-01", "avant 2025"),
+    ("PEGFILGRASTIM", "2025-01-01", "avant 2025"),
+    ("RANIBIZUMAB", "2025-01-01", "avant 2025"),
+    ("TERIPARATIDE", "2025-02-28", "28/02/2025 — arrêté du 20/02/2025 (JO du 27/02/2025)"),
+    ("ETANERCEPT", "2025-02-28", "28/02/2025 — arrêté du 20/02/2025 (JO du 27/02/2025)"),
+    ("ADALIMUMAB", "2025-02-28", "28/02/2025 — arrêté du 20/02/2025 (JO du 27/02/2025)"),
+    ("ENOXAPARINE", "2025-02-28", "28/02/2025 — arrêté du 20/02/2025 (JO du 27/02/2025)"),
+    ("FOLLITROPINE", "2025-02-28", "28/02/2025 — arrêté du 20/02/2025 (JO du 27/02/2025)"),
+    # groupe époétine (référent Eprex) : époétine alfa et époétine zêta (Retacrit)
+    ("EPOETINE", "2025-02-28", "28/02/2025 — arrêté du 20/02/2025 (JO du 27/02/2025)"),
+    ("ERYTHROPOIETINE", "2025-02-28", "28/02/2025 — arrêté du 20/02/2025, groupe époétine (Eprex)"),
+    # date de publication au JO non vérifiée : fin décembre 2025 retenue (sans effet sur 2026)
+    ("AFLIBERCEPT", "2025-12-31", "décembre 2025 — arrêté du 04/12/2025"),
+    ("USTEKINUMAB", "2026-04-15", "15/04/2026 — arrêté du 10/04/2026 (JO du 14/04/2026)"),
+    ("DENOSUMAB", "2026-09-23", "23/09/2026 — arrêté du 17/09/2026 (JO du 22/09/2026)"),
+]
+
+
+def substitution_biosim(molecule):
+    """(date d'effet 'AAAA-MM-JJ', texte) ou (None, "non substituable") —
+    le mot-clé le plus long l'emporte (PEGFILGRASTIM avant FILGRASTIM)."""
+    m = _normaliser_txt(molecule)
+    for cle, date_effet, texte in sorted(SUBSTITUTION_BIOSIM, key=lambda x: -len(x[0])):
+        if m.startswith(cle):
+            return date_effet, texte
+    return None, "non substituable en officine (absent de la liste des arrêtés)"
+
+
+def _debut_periode_biosim(libelle):
+    a, mois, _ = cle_periode_biosim(libelle)
+    return f"{a:04d}-{mois:02d}-01"
+
+
+def periode_substituable(molecule, periode):
+    date_effet, _ = substitution_biosim(molecule)
+    return date_effet is not None and _debut_periode_biosim(periode) >= date_effet
+
+
+def _normaliser_txt(t):
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFKD", t or "")
+                   if not unicodedata.combining(c)).upper().strip()
 TEAL, TEAL_CLAIR = "00838F", "DDF2F4"   # couleur du partenaire dans les onglets biosimilaires
 ROUGE_FUITE, ROUGE_CLAIR = "C00000", "FCE4E4"
 
@@ -2227,8 +2292,15 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
     for l in lignes:   # relevé sans récap OCP imputé : brut = net
         l.setdefault("remise", 0.0)
         l.setdefault("ca_brut", l["ca_net"])
+        l["substituable"] = "Oui" if periode_substituable(l["molecule"], l["trimestre"]) else "Non"
     trimestres = sorted({l["trimestre"] for l in lignes}, key=cle_periode_biosim)
     molecules = sorted({l["molecule"] for l in lignes})
+    for mol in molecules:
+        if substitution_biosim(mol)[0] is None:
+            print(f"  ⚠️  Biosimilaires : « {mol} » n'est pas dans la liste des molécules substituables "
+                  "de l'outil (SUBSTITUTION_BIOSIM) — exclue des taux de substitution et parts de "
+                  "marché. Si un arrêté l'a rendue substituable, ajouter sa date dans l'outil.",
+                  file=sys.stderr)
     labos = sorted({l["laboratoire"] for l in lignes})
     P = LABO_PARTENAIRE_BIOSIM
     p_nom = P.capitalize()
@@ -2249,14 +2321,17 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
                    if canaux_directs else "")
                 + "CA brut = prix d'achat avant remise (OCP : PPHT ; direct : PFHT facturé) ; "
                 "remise OCP retrouvée par CIP et période dans les récaps d'offres OCP ; CA remisé = "
-                "CA brut − remise. Parts biosimilaire et " + p_nom + " calculées sur le CA brut, "
-                "tous laboratoires d'une même molécule (biosimilaires et bioréférent). Les montants "
+                "CA brut − remise. Taux de substitution (part biosimilaire) et part de marché "
+                + p_nom + " calculés sur le CA brut, tous laboratoires d'une même molécule "
+                "(biosimilaires et bioréférent), UNIQUEMENT sur les périodes où la substitution par le "
+                "pharmacien était autorisée (période commençant à la date d'effet de l'arrêté ou après ; "
+                "colonne « Substituable depuis »). Les montants "
                 "du relevé OCP ne sont PAS additionnés aux autres onglets ; les achats directs figurent "
                 "aussi dans 'Détail lignes'. Colonne « Source » du détail pour filtrer.")
     ws["A2"].font = SUBTITLE_FONT
     ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
-    ws.row_dimensions[2].height = 70
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=11)
+    ws.row_dimensions[2].height = 84
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=14)
 
     # Emplacements connus à l'avance (le détail, en bas, sert aux formules)
     n_mol, n_lab, nT = len(molecules), len(labos), len(trimestres)
@@ -2269,62 +2344,88 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
     def rng(col):
         return f"${col}${first_det}:${col}${last_det}"
     # Détail : A Molécule, B Statut, C Laboratoire, D Désignation, E CIP13,
-    # F Période (trimestre ou mois), G Qté, H CA PGHT, I CA brut, J Remise, K CA remisé, L Source
+    # F Période (trimestre ou mois), G Qté, H CA PGHT, I CA brut, J Remise, K CA remisé, L Source,
+    # M Période substituable (Oui / Non)
     R_MOL, R_STAT, R_LAB, R_TRIM, R_QTE = rng("A"), rng("B"), rng("C"), rng("F"), rng("G")
-    R_BRUT, R_REM, R_NET = rng("I"), rng("J"), rng("K")
+    R_BRUT, R_REM, R_NET, R_SUB = rng("I"), rng("J"), rng("K"), rng("M")
+    SUB = f',{R_SUB},"Oui"'
+
+    def texte_subst(mol):
+        # forme courte (date) ; référence complète de l'arrêté : onglet fuite et Méthodologie
+        d, t = substitution_biosim(mol)
+        return t.split(" — ")[0] if d else "non substituable"
 
     # --- 1. Par molécule -------------------------------------------------
-    _titre_section(ws, h1 - 2, f"1. Par molécule — prix brut, prix remisé, part de marché {p_nom}", 11)
-    _bandeau_groupes(ws, h1 - 1, [(1, 1, "", NAVY), (2, 7, "Tous laboratoires", BLEU_REPERTOIRE),
-                                  (8, 11, p_nom, TEAL)])
-    headers = ["Molécule", "CA brut (€)", "Remise (€)", "CA remisé (€)", "Taux de remise",
-               "dont biosimilaires — CA brut (€)", "Part biosimilaire",
+    _titre_section(ws, h1 - 2, f"1. Par molécule — prix brut, prix remisé, taux de substitution, "
+                               f"part de marché {p_nom}", 14)
+    _bandeau_groupes(ws, h1 - 1, [(1, 2, "", NAVY),
+                                  (3, 6, "Achats — tous laboratoires, toute la période", BLEU_REPERTOIRE),
+                                  (7, 9, "Taux de substitution (période substituable)", VERT_ASSIETTE),
+                                  (10, 14, p_nom, TEAL)])
+    headers = ["Molécule", "Substituable depuis", "CA brut (€)", "Remise (€)", "CA remisé (€)",
+               "Taux de remise", "CA brut — période substituable (€)", "dont biosimilaires (€)",
+               "Taux de substitution (part biosimilaire)",
                f"{p_nom} — CA brut (€)", f"{p_nom} — remise (€)", f"{p_nom} — CA remisé (€)",
-               f"Part de marché {p_nom}"]
+               f"{p_nom} — CA brut période substituable (€)", f"Part de marché {p_nom}"]
     for i, h in enumerate(headers, start=1):
         ws.cell(row=h1, column=i, value=h).alignment = Alignment(
             horizontal="center", vertical="center", wrap_text=True)
     style_header_row(ws, h1, len(headers))
-    ws.row_dimensions[h1].height = 44
+    ws.row_dimensions[h1].height = 58
     for k, mol in enumerate(molecules):
         row = h1 + 1 + k
         m = f"{R_MOL},$A{row}"
         sp = f'{m},{R_LAB},"{P}"'
         ws.cell(row=row, column=1, value=mol)
-        ws.cell(row=row, column=2, value=f"=SUMIFS({R_BRUT},{m})")
-        ws.cell(row=row, column=3, value=f"=SUMIFS({R_REM},{m})")
-        ws.cell(row=row, column=4, value=f"=B{row}-C{row}")
-        ws.cell(row=row, column=6, value=f'=SUMIFS({R_BRUT},{m},{R_STAT},"Biosimilaire")')
-        ws.cell(row=row, column=8, value=f"=SUMIFS({R_BRUT},{sp})")
-        ws.cell(row=row, column=9, value=f"=SUMIFS({R_REM},{sp})")
-        ws.cell(row=row, column=10, value=f"=H{row}-I{row}")
+        ws.cell(row=row, column=2, value=texte_subst(mol))
+        ws.cell(row=row, column=3, value=f"=SUMIFS({R_BRUT},{m})")
+        ws.cell(row=row, column=4, value=f"=SUMIFS({R_REM},{m})")
+        ws.cell(row=row, column=5, value=f"=C{row}-D{row}")
+        ws.cell(row=row, column=7, value=f"=SUMIFS({R_BRUT},{m}{SUB})")
+        ws.cell(row=row, column=8, value=f'=SUMIFS({R_BRUT},{m},{R_STAT},"Biosimilaire"{SUB})')
+        ws.cell(row=row, column=10, value=f"=SUMIFS({R_BRUT},{sp})")
+        ws.cell(row=row, column=11, value=f"=SUMIFS({R_REM},{sp})")
+        ws.cell(row=row, column=12, value=f"=J{row}-K{row}")
+        ws.cell(row=row, column=13, value=f"=SUMIFS({R_BRUT},{sp}{SUB})")
     t1 = h1 + 1 + n_mol
     ws.cell(row=t1, column=1, value="TOTAL")
-    for c in (2, 3, 4, 6, 8, 9, 10):
+    for c in (3, 4, 5, 7, 8, 10, 11, 12, 13):
         L = get_column_letter(c)
         ws.cell(row=t1, column=c, value=f"=SUM({L}{h1 + 1}:{L}{t1 - 1})")
     for row in range(h1 + 1, t1 + 1):
-        ws.cell(row=row, column=5, value=f"=IFERROR(C{row}/B{row},0)")
-        ws.cell(row=row, column=7, value=f"=IFERROR(F{row}/B{row},0)")
-        ws.cell(row=row, column=11, value=f"=IFERROR(H{row}/B{row},0)")
-    _mise_en_forme_tableau(ws, h1 + 1, t1, len(headers), {2, 3, 4, 6, 8, 9, 10}, {5, 7, 11})
-    for c in range(8, 12):
+        ws.cell(row=row, column=6, value=f"=IFERROR(D{row}/C{row},0)")
+        # « — » si aucun achat en période substituable (hors échelle et barres)
+        ws.cell(row=row, column=9, value=f'=IF(G{row}=0,"—",H{row}/G{row})')
+        ws.cell(row=row, column=14, value=f'=IF(G{row}=0,"—",M{row}/G{row})')
+    _mise_en_forme_tableau(ws, h1 + 1, t1, len(headers), {3, 4, 5, 7, 8, 10, 11, 12, 13}, {6, 9, 14})
+    for r in range(h1 + 1, t1):
+        c = ws.cell(row=r, column=2)
+        c.alignment = Alignment(wrap_text=True, vertical="center")
+        c.font = Font(name=FONT_NAME, size=9, color="595959")
+        for col in (9, 14):
+            ws.cell(row=r, column=col).alignment = Alignment(horizontal="center", vertical="center")
+    for c in range(7, 10):
+        ws.cell(row=h1, column=c).fill = PatternFill("solid", start_color=VERT_ASSIETTE, end_color=VERT_ASSIETTE)
+        _teinter_colonne(ws, c, h1 + 1, t1 - 1, VERT_CLAIR)
+    for c in range(10, 15):
         ws.cell(row=h1, column=c).fill = PatternFill("solid", start_color=TEAL, end_color=TEAL)
         _teinter_colonne(ws, c, h1 + 1, t1 - 1, TEAL_CLAIR)
-    _barre(ws, f"G{h1 + 1}:G{t1}", "5B9BD5")
-    _barre(ws, f"K{h1 + 1}:K{t1}", TEAL)
+    _barre(ws, f"I{h1 + 1}:I{t1}", "63BE7B")
+    _barre(ws, f"N{h1 + 1}:N{t1}", TEAL)
 
     # --- 2. Part de marché du partenaire par trimestre -------------------
     _titre_section(ws, h2 - 1, f"2. Part de marché {p_nom} par molécule et par période "
-                               f"(CA brut {p_nom} / CA brut de la molécule ; vide = aucun achat ; — = aucun produit {p_nom})",
-                   max(11, 4 + nT), TEAL)
+                               f"(CA brut {p_nom} / CA brut de la molécule ; vide = aucun achat ; — = aucun produit {p_nom} ; "
+                               f"« non subst. » = substitution pas encore autorisée)",
+                   max(14, 4 + nT), TEAL)
     headers2 = ["Molécule"] + [f"Part {p_nom} {t}" for t in trimestres] + [
-        f"Part {p_nom} cumul", f"{p_nom} — CA brut cumul (€)", "Molécule — CA brut cumul (€)"]
+        f"Part {p_nom} cumul (période substituable)", f"{p_nom} — CA brut période substituable (€)",
+        "Molécule — CA brut période substituable (€)"]
     for i, h in enumerate(headers2, start=1):
         ws.cell(row=h2, column=i, value=h).alignment = Alignment(
             horizontal="center", vertical="center", wrap_text=True)
     style_header_row(ws, h2, len(headers2))
-    ws.row_dimensions[h2].height = 44
+    ws.row_dimensions[h2].height = 58
     c_sp, c_tot = 3 + nT, 4 + nT
     L_sp, L_tot = get_column_letter(c_sp), get_column_letter(c_tot)
     t2 = h2 + 1 + n_mol
@@ -2334,12 +2435,15 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
         ws.cell(row=row, column=1, value="TOTAL" if is_tot else molecules[k])
         m = "" if is_tot else f",{R_MOL},$A{row}"
         for j, t in enumerate(trimestres):
-            tot_t = f'SUMIFS({R_BRUT},{R_TRIM},"{t}"{m})'
+            if not is_tot and not periode_substituable(molecules[k], t):
+                ws.cell(row=row, column=2 + j, value="non subst.")
+                continue
+            tot_t = f'SUMIFS({R_BRUT},{R_TRIM},"{t}"{m}{SUB})'
             ws.cell(row=row, column=2 + j,
-                    value=f'=IF({tot_t}=0,"",SUMIFS({R_BRUT},{R_TRIM},"{t}",{R_LAB},"{P}"{m})/{tot_t})')
-        ws.cell(row=row, column=c_sp, value=f'=SUMIFS({R_BRUT},{R_LAB},"{P}"{m})')
-        ws.cell(row=row, column=c_tot, value=f"=SUMIFS({R_BRUT}{m})" if m else f"=SUM({R_BRUT})")
-        ws.cell(row=row, column=2 + nT, value=f"=IFERROR({L_sp}{row}/{L_tot}{row},0)")
+                    value=f'=IF({tot_t}=0,"",SUMIFS({R_BRUT},{R_TRIM},"{t}",{R_LAB},"{P}"{m}{SUB})/{tot_t})')
+        ws.cell(row=row, column=c_sp, value=f'=SUMIFS({R_BRUT},{R_LAB},"{P}"{m}{SUB})')
+        ws.cell(row=row, column=c_tot, value=f"=SUMIFS({R_BRUT}{m}{SUB})")
+        ws.cell(row=row, column=2 + nT, value=f'=IF({L_tot}{row}=0,"—",{L_sp}{row}/{L_tot}{row})')
     _mise_en_forme_tableau(ws, h2 + 1, t2, len(headers2), {c_sp, c_tot}, set(range(2, 3 + nT)))
     # Molécules sans aucun produit du partenaire acheté : pas de part à suivre
     # (« — » en gris, hors échelle de couleurs).
@@ -2358,10 +2462,14 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
     _echelle_part(ws, f"B{h2 + 1}:{get_column_letter(2 + nT)}{t2}")
     for r in range(h2 + 1, t2 + 1):
         for c in range(2, 3 + nT):
-            ws.cell(row=r, column=c).alignment = Alignment(horizontal="center")
+            cell = ws.cell(row=r, column=c)
+            cell.alignment = Alignment(horizontal="center")
+            if cell.value == "non subst.":
+                cell.font = Font(name=FONT_NAME, size=9, italic=True, color="A6A6A6")
+                cell.fill = PatternFill("solid", start_color=GRIS_CLAIR, end_color=GRIS_CLAIR)
 
     # --- 3. Par laboratoire ---------------------------------------------
-    _titre_section(ws, h3 - 1, "3. Par laboratoire — CA brut (€)", max(11, 7 + nT))
+    _titre_section(ws, h3 - 1, "3. Par laboratoire — CA brut (€), toute la période", max(14, 7 + nT))
     headers3 = (["Laboratoire"] + [f"CA brut {t}" for t in trimestres]
                 + ["CA brut (€)", "Remise (€)", "CA remisé (€)", "dont biosimilaires — CA brut (€)",
                    "Qté", "Part du CA brut total"])
@@ -2369,7 +2477,7 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
         ws.cell(row=h3, column=i, value=h).alignment = Alignment(
             horizontal="center", vertical="center", wrap_text=True)
     style_header_row(ws, h3, len(headers3))
-    ws.row_dimensions[h3].height = 32
+    ws.row_dimensions[h3].height = 44
     cB, cR, cN, cBS, cQ, cP = (2 + nT + i for i in range(6))
     t3 = h3 + 1 + n_lab
     for k, lab in enumerate(labos):
@@ -2401,9 +2509,10 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
     _barre(ws, f"{get_column_letter(cP)}{h3 + 1}:{get_column_letter(cP)}{t3 - 1}", "5B9BD5")
 
     # --- 4. Détail produit x trimestre ------------------------------------
-    _titre_section(ws, h4 - 1, f"4. Détail par produit et par période (lignes {p_nom} surlignées)", 12)
+    _titre_section(ws, h4 - 1, f"4. Détail par produit et par période (lignes {p_nom} surlignées)", 14)
     headers_d = ["Molécule", "Statut", "Laboratoire", "Désignation", "CIP13", "Période",
-                 "Qté", "CA PGHT (€)", "CA brut (€)", "Remise (€)", "CA remisé (€)", "Source"]
+                 "Qté", "CA PGHT (€)", "CA brut (€)", "Remise (€)", "CA remisé (€)", "Source",
+                 "Période substituable"]
     for i, h in enumerate(headers_d, start=1):
         ws.cell(row=h4, column=i, value=h)
     style_header_row(ws, h4, len(headers_d))
@@ -2412,16 +2521,18 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
         row = first_det + k
         vals = [l["molecule"], l["statut"], l["laboratoire"], l["designation"], l["cip13"],
                 l["trimestre"], l["qte"], l["ca_pght"], l["ca_brut"], l["remise"],
-                f"=I{row}-J{row}", l["source"]]
+                f"=I{row}-J{row}", l["source"], l["substituable"]]
         for c, v in enumerate(vals, start=1):
             cell = ws.cell(row=row, column=c, value=v)
             cell.font = NORMAL_FONT
             if 8 <= c <= 11:
                 cell.number_format = EUR_FMT
-    tab = Table(displayName="Biosimilaires", ref=f"A{h4}:L{last_det}")
+    tab = Table(displayName="Biosimilaires", ref=f"A{h4}:M{last_det}")
     tab.tableStyleInfo = TableStyleInfo(name="TableStyleLight1", showRowStripes=True)
     ws.add_table(tab)
-    ws.conditional_formatting.add(f"A{first_det}:L{last_det}", FormulaRule(
+    ws.conditional_formatting.add(f"M{first_det}:M{last_det}", FormulaRule(
+        formula=[f'$M{first_det}="Non"'], font=Font(italic=True, color="A6A6A6")))
+    ws.conditional_formatting.add(f"A{first_det}:M{last_det}", FormulaRule(
         formula=[f'$C{first_det}="{P}"'],
         fill=PatternFill("solid", start_color=TEAL_CLAIR, end_color=TEAL_CLAIR),
         font=Font(color=TEAL, bold=True)))
@@ -2431,9 +2542,9 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
     for r in range(first_det, last_det + 1):
         ws.cell(row=r, column=3).alignment = Alignment(wrap_text=True, vertical="center")
         ws.cell(row=r, column=4).alignment = Alignment(wrap_text=True, vertical="center")
-    autosize(ws, {"A": 24, "B": 14, "C": 22, "D": 28, "E": 15, "F": 14, "G": 14,
-                  "H": 14, "I": 14, "J": 14, "K": 15, "L": 15,
-                  **{get_column_letter(c): 14 for c in range(13, 3 + nT + 7)}})
+    autosize(ws, {"A": 24, "B": 16, "C": 22, "D": 28, "E": 15, "F": 14, "G": 15,
+                  "H": 14, "I": 15, "J": 14, "K": 15, "L": 15, "M": 15, "N": 14,
+                  **{get_column_letter(c): 14 for c in range(15, 3 + nT + 7)}})
     ws.freeze_panes = "B4"
     return {"lignes": lignes, "first_det": first_det, "last_det": last_det,
             "trimestres": trimestres}
@@ -2453,16 +2564,20 @@ def build_sheet_fuite_sandoz(wb, info):
     for l in lignes:
         if l["laboratoire"] == P:
             produits_p[l["molecule"]].add(l["designation"])
-    molecules = sorted(produits_p)
+    # Fuite comptée seulement sur les périodes où la substitution était autorisée
+    molecules = sorted(m for m in produits_p if substitution_biosim(m)[0] is not None)
     fuites = sorted({(l["molecule"], l["statut"], l["laboratoire"], l["designation"], cle_cip13(l["cip13"]))
-                     for l in lignes if l["molecule"] in produits_p and l["laboratoire"] != P})
+                     for l in lignes if l["molecule"] in molecules and l["laboratoire"] != P
+                     and l["substituable"] == "Oui"})
     ws = wb.create_sheet(f"Fuite biosimilaires {p_nom}")
     ws["A1"] = f"Fuite biosimilaires — molécules disponibles chez {p_nom}, achetées chez un autre laboratoire"
     ws["A1"].font = TITLE_FONT
     ws["A2"] = (f"Molécule « disponible chez {p_nom} » = au moins un produit {p_nom} de cette molécule acheté "
                 "sur la période (relevé OCP ou factures directes) : une molécule dont aucun produit "
                 f"{p_nom} n'a été acheté n'apparaît pas ici. Bioréférents compris. Montants en CA brut "
-                "(prix avant remise), repris de l'onglet « Biosimilaires ».")
+                "(prix avant remise), repris de l'onglet « Biosimilaires », comptés UNIQUEMENT sur les "
+                "périodes où la substitution par le pharmacien était autorisée (colonne « Substituable "
+                "depuis » ; « — » dans le détail = période non substituable).")
     ws["A2"].font = SUBTITLE_FONT
     ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
     ws.merge_cells("A2:J2")
@@ -2471,15 +2586,16 @@ def build_sheet_fuite_sandoz(wb, info):
     f0, f1 = info["first_det"], info["last_det"]
     rb = lambda c: f"{B}${c}${f0}:${c}${f1}"
     R_MOL, R_STAT, R_LAB, R_CIP, R_TRIM, R_QTE = rb("A"), rb("B"), rb("C"), rb("E"), rb("F"), rb("G")
-    R_BRUT, R_REM = rb("I"), rb("J")
+    R_BRUT, R_REM, R_SUB = rb("I"), rb("J"), rb("M")
+    SUB = f',{R_SUB},"Oui"'
 
     # 1. Synthèse par molécule — colonnes alignées sur le détail (2.) pour
     # que les colonnes de texte larges tombent au même endroit.
     h1 = 5
-    _titre_section(ws, h1 - 1, "1. Synthèse par molécule", 8, ROUGE_FUITE)
+    _titre_section(ws, h1 - 1, "1. Synthèse par molécule (période substituable)", 9, ROUGE_FUITE)
     hdr = ["Molécule", "Laboratoires concernés", f"Produits {p_nom} achetés", "CA brut molécule (€)",
            f"CA brut {p_nom} (€)", f"CA brut hors {p_nom} — fuite (€)", "Part de la fuite",
-           f"Qté hors {p_nom}"]
+           f"Qté hors {p_nom}", "Substituable depuis"]
     for i, h in enumerate(hdr, start=1):
         ws.cell(row=h1, column=i, value=h).alignment = Alignment(horizontal="center", vertical="center",
                                                                   wrap_text=True)
@@ -2492,10 +2608,11 @@ def build_sheet_fuite_sandoz(wb, info):
         ws.cell(row=row, column=1, value=mol)
         ws.cell(row=row, column=2, value=", ".join(labs) if labs else "— (aucune fuite)")
         ws.cell(row=row, column=3, value="\n".join(sorted(produits_p[mol])))
-        ws.cell(row=row, column=4, value=f"=SUMIFS({R_BRUT},{m})")
-        ws.cell(row=row, column=5, value=f'=SUMIFS({R_BRUT},{m},{R_LAB},"{P}")')
+        ws.cell(row=row, column=4, value=f"=SUMIFS({R_BRUT},{m}{SUB})")
+        ws.cell(row=row, column=5, value=f'=SUMIFS({R_BRUT},{m},{R_LAB},"{P}"{SUB})')
         ws.cell(row=row, column=6, value=f"=D{row}-E{row}")
-        ws.cell(row=row, column=8, value=f'=SUMIFS({R_QTE},{m},{R_LAB},"<>{P}")')
+        ws.cell(row=row, column=8, value=f'=SUMIFS({R_QTE},{m},{R_LAB},"<>{P}"{SUB})')
+        ws.cell(row=row, column=9, value=substitution_biosim(mol)[1])
     t1 = h1 + 1 + len(molecules)
     ws.cell(row=t1, column=1, value="TOTAL")
     for c in (4, 5, 6, 8):
@@ -2507,8 +2624,9 @@ def build_sheet_fuite_sandoz(wb, info):
     ws.row_dimensions[h1].height = 44
     for r in range(h1 + 1, t1):
         for c in range(1, len(hdr) + 1):
-            ws.cell(row=r, column=c).alignment = Alignment(wrap_text=(c in (2, 3)), vertical="center")
+            ws.cell(row=r, column=c).alignment = Alignment(wrap_text=(c in (2, 3, 9)), vertical="center")
         ws.cell(row=r, column=3).font = Font(name=FONT_NAME, size=9, color=TEAL)
+        ws.cell(row=r, column=9).font = Font(name=FONT_NAME, size=9, color="595959")
         ws.cell(row=r, column=6).font = Font(name=FONT_NAME, size=10, bold=True, color=ROUGE_FUITE)
     _teinter_colonne(ws, 5, h1 + 1, t1 - 1, TEAL_CLAIR)
     _teinter_colonne(ws, 6, h1 + 1, t1 - 1, ROUGE_CLAIR)
@@ -2537,12 +2655,15 @@ def build_sheet_fuite_sandoz(wb, info):
         debut = row + 1
         for (_, statut, lab, desig, cip) in prods:
             row += 1
-            crit = f"{R_CIP},$E{row},{R_LAB},$B{row}"
+            crit = f"{R_CIP},$E{row},{R_LAB},$B{row}{SUB}"
             vals = [mol, lab, desig, statut, cip]
             for c, v in enumerate(vals, start=1):
                 ws.cell(row=row, column=c, value=v)
             for j, t in enumerate(trimestres):
-                ws.cell(row=row, column=6 + j, value=f'=SUMIFS({R_BRUT},{crit},{R_TRIM},"{t}")')
+                if periode_substituable(mol, t):
+                    ws.cell(row=row, column=6 + j, value=f'=SUMIFS({R_BRUT},{crit},{R_TRIM},"{t}")')
+                else:
+                    ws.cell(row=row, column=6 + j, value="—")
             ws.cell(row=row, column=cQ, value=f"=SUMIFS({R_QTE},{crit})")
             ws.cell(row=row, column=cB, value=f"=SUMIFS({R_BRUT},{crit})")
             ws.cell(row=row, column=cR, value=f"=SUMIFS({R_REM},{crit})")
@@ -2556,6 +2677,12 @@ def build_sheet_fuite_sandoz(wb, info):
                     cell.number_format = EUR_FMT
             for c in (2, 3):
                 ws.cell(row=row, column=c).alignment = Alignment(wrap_text=True, vertical="center")
+            for j, t in enumerate(trimestres):
+                if not periode_substituable(mol, t):
+                    cell = ws.cell(row=row, column=6 + j)
+                    cell.alignment = Alignment(horizontal="center")
+                    cell.font = Font(name=FONT_NAME, size=9, italic=True, color="A6A6A6")
+                    cell.fill = PatternFill("solid", start_color=GRIS_CLAIR, end_color=GRIS_CLAIR)
         row += 1
         sous_totaux.append(row)
         ws.cell(row=row, column=1, value=f"Total {mol}")
@@ -2579,7 +2706,8 @@ def build_sheet_fuite_sandoz(wb, info):
         if c >= 6 and c != cQ:
             cell.number_format = EUR_FMT
     autosize(ws, {"A": 22, "B": 26, "C": 36, "D": 15, "E": 16, "F": 15, "G": 14, "H": 14,
-                  **{get_column_letter(c): 14 for c in range(9, ncol + 1)}})
+                  **{get_column_letter(c): 14 for c in range(9, ncol + 1)},
+                  "I": max(22, 14)})
     ws.freeze_panes = f"B{h1 + 1}"
 
 
