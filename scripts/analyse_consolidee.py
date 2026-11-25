@@ -1911,7 +1911,12 @@ def build_sheet_methodologie(wb):
         "de chaque produit est retrouvée par CIP13 et trimestre dans les récaps d'offres OCP "
         "(contrôle : total = remise imprimée sur le relevé, écart signalé sinon). CA brut = CA "
         "net + remise. Achats directs : PFHT facturé (prix fabricant, sans marge grossiste, donc "
-        "environ 7 % sous le PPHT d'une même boîte achetée chez OCP).",
+        "environ 7 % sous le PPHT d'une même boîte achetée chez OCP). Achats Alliance : PPHT et "
+        "remise des factures Alliance.",
+        "- Achats hors OCP (Alliance, factures directes) : repris des factures, produit reconnu "
+        "par son CIP ou sa marque dans le relevé OCP, sinon par la liste MARQUES_BIOSIM de l'outil "
+        "(à compléter avec SUBSTITUTION_BIOSIM). Les lignes OCP ne viennent que du relevé (pas "
+        "de double compte).",
         "- Taux de substitution, part de marché et fuite : comptés UNIQUEMENT sur les périodes "
         "où la substitution par le pharmacien était autorisée. Une période (mois si relevés "
         "mensuels, trimestre sinon) compte si elle commence à la date d'effet ou après (lendemain "
@@ -2227,37 +2232,115 @@ def imputer_remises_biosimilaires(releves, all_rows):
                   file=sys.stderr)
 
 
+# Marques de biosimilaires et de bioréférents des groupes substituables, pour
+# reconnaître les achats hors relevé OCP (Alliance, factures directes) quand la
+# marque n'a jamais été achetée chez OCP. Le relevé OCP reste prioritaire
+# (même CIP, puis même marque) ; cette table complète. Laboratoire vide =
+# non renseigné (seule l'identification du partenaire Sandoz compte pour les
+# parts de marché). À compléter avec SUBSTITUTION_BIOSIM.
+MARQUES_BIOSIM = {
+    # marque: (molécule telle que nommée par OCP, statut, laboratoire)
+    "HUMIRA": ("ADALIMUMAB", "Bioréférent", "ABBVIE"),
+    "AMGEVITA": ("ADALIMUMAB", "Biosimilaire", "AMGEN"),
+    "IMRALDI": ("ADALIMUMAB", "Biosimilaire", "BIOGEN"),
+    "HYRIMOZ": ("ADALIMUMAB", "Biosimilaire", "SANDOZ"),
+    "HULIO": ("ADALIMUMAB", "Biosimilaire", "BIOCON FROID"),
+    "IDACIO": ("ADALIMUMAB", "Biosimilaire", "FRESENIUS KABI FRANCE"),
+    "YUFLYMA": ("ADALIMUMAB", "Biosimilaire", "CELLTRION HEALTHCARE FRA"),
+    "HUKYNDRA": ("ADALIMUMAB", "Biosimilaire", ""),
+    "LIBMYRIS": ("ADALIMUMAB", "Biosimilaire", ""),
+    "ENBREL": ("ETANERCEPT", "Bioréférent", ""),
+    "BENEPALI": ("ETANERCEPT", "Biosimilaire", "BIOGEN"),
+    "ERELZI": ("ETANERCEPT", "Biosimilaire", "SANDOZ"),
+    "NEPEXTO": ("ETANERCEPT", "Biosimilaire", ""),
+    "PROLIA": ("DENOSUMAB", "Bioréférent", "AMGEN"),
+    "XGEVA": ("DENOSUMAB", "Bioréférent", "AMGEN"),
+    "JUBBONTI": ("DENOSUMAB", "Biosimilaire", "SANDOZ"),
+    "WYOST": ("DENOSUMAB", "Biosimilaire", "SANDOZ"),
+    "STOBOCLO": ("DENOSUMAB", "Biosimilaire", "CELLTRION HEALTHCARE FRA"),
+    "OSENVELT": ("DENOSUMAB", "Biosimilaire", "CELLTRION HEALTHCARE FRA"),
+    "CONEXXENCE": ("DENOSUMAB", "Biosimilaire", "FRESENIUS KABI FRANCE"),
+    "BOMYNTRA": ("DENOSUMAB", "Biosimilaire", "FRESENIUS KABI FRANCE"),
+    **{m: ("DENOSUMAB", "Biosimilaire", "") for m in (
+        "ACVYBRA", "EVFRAXY", "IZAMBY", "KEFDENSIS", "OBODENCE", "OSVYRTI", "PONLIMSI", "ZADENVI",
+        "JUNOD", "BILPREVDA", "DEGEVMA", "DENBRAYCE", "ENWYLMA", "JUBEREQ")},
+    "LOVENOX": ("ENOXAPARINE SODIQUE", "Bioréférent", "SANOFI"),
+    "INHIXA": ("ENOXAPARINE SODIQUE", "Biosimilaire", ""),
+    "NEULASTA": ("PEGFILGRASTIM", "Bioréférent", "AMGEN"),
+    "ZIEXTENZO": ("PEGFILGRASTIM", "Biosimilaire", "SANDOZ"),
+    "PELGRAZ": ("PEGFILGRASTIM", "Biosimilaire", "ACCORD HEALTHCARE FRA"),
+    "STIMUFEND": ("PEGFILGRASTIM", "Biosimilaire", "FRESENIUS KABI FRANCE"),
+    "FULPHILA": ("PEGFILGRASTIM", "Biosimilaire", ""),
+    "PELMEG": ("PEGFILGRASTIM", "Biosimilaire", ""),
+    "NYVEPRIA": ("PEGFILGRASTIM", "Biosimilaire", ""),
+    "NEUPOGEN": ("FILGRASTIM", "Bioréférent", "AMGEN"),
+    "ZARZIO": ("FILGRASTIM", "Biosimilaire", "SANDOZ"),
+    "NIVESTIM": ("FILGRASTIM", "Biosimilaire", ""),
+    "ACCOFIL": ("FILGRASTIM", "Biosimilaire", "ACCORD HEALTHCARE FRA"),
+    "TEVAGRASTIM": ("FILGRASTIM", "Biosimilaire", ""),
+    "EPREX": ("EPOETINE ALFA", "Bioréférent", ""),
+    "BINOCRIT": ("EPOETINE ALFA", "Biosimilaire", "SANDOZ"),
+    "RETACRIT": ("ERYTHROPOIETINE ZETA", "Biosimilaire", "PFIZER"),
+    "LUCENTIS": ("RANIBIZUMAB", "Bioréférent", "NOVARTIS PHARMA"),
+    "BYOOVIZ": ("RANIBIZUMAB", "Biosimilaire", ""),
+    "XIMLUCI": ("RANIBIZUMAB", "Biosimilaire", ""),
+    "EYLEA": ("AFLIBERCEPT", "Bioréférent", "BAYER H"),
+    "AFQLIR": ("AFLIBERCEPT", "Biosimilaire", "SANDOZ"),
+    "FORSTEO": ("TERIPARATIDE", "Bioréférent", ""),
+    "MOVYMIA": ("TERIPARATIDE", "Biosimilaire", "EG LABO"),
+    "TERROSA": ("TERIPARATIDE", "Biosimilaire", ""),
+    "GONAL": ("FOLLITROPINE ALPHA", "Bioréférent", ""),
+    "OVALEAP": ("FOLLITROPINE ALPHA", "Biosimilaire", ""),
+    "BEMFOLA": ("FOLLITROPINE ALPHA", "Biosimilaire", ""),
+    "STELARA": ("USTEKINUMAB", "Bioréférent", ""),
+    "PYZCHIVA": ("USTEKINUMAB", "Biosimilaire", "SANDOZ"),
+    "WEZENLA": ("USTEKINUMAB", "Biosimilaire", "AMGEN"),
+    "UZPRUVO": ("USTEKINUMAB", "Biosimilaire", ""),
+    "STEQEYMA": ("USTEKINUMAB", "Biosimilaire", "CELLTRION HEALTHCARE FRA"),
+}
+
+
 def biosimilaires_des_factures_directes(releves, all_rows, libelle_periode=None):
-    """Lignes des factures directes (canaux « ... Direct » hors Biogaran) qui
-    sont des biosimilaires / bioréférents. Identification par la MARQUE (1er
-    mot de la désignation : HYRIMOZ, ZIEXTENZO...) rapprochée des produits du
-    relevé OCP, qui donne molécule, statut et laboratoire. Sans relevé OCP, pas
-    de référentiel : rien n'est identifié (signalé)."""
-    ref = {}
+    """Achats de biosimilaires / bioréférents HORS relevé OCP : factures
+    Alliance et factures directes des laboratoires (hors Biogaran). Le relevé
+    OCP ne couvre que les achats OCP ; les lignes OCP ne sont donc jamais
+    reprises ici (pas de double compte). Identification, dans l'ordre :
+    1) même CIP qu'un produit du relevé OCP ; 2) même marque (1er mot) qu'un
+    produit du relevé ; 3) marque de MARQUES_BIOSIM. Seuls les CIP de
+    médicaments (34009...) sont retenus (un stylo réutilisable vendu seul,
+    ex. « MOVYMIA PEN », n'est pas un médicament)."""
+    par_cip, par_marque = {}, {}
     for r in releves:
         for l in r["lignes"]:
-            ref.setdefault(_marque(l["designation"]), l)
-    directs = [r for r in all_rows
-               if r.get("canal", "").endswith(" Direct") and r["canal"] != "Biogaran Direct"]
+            par_cip.setdefault(cle_cip13(l["cip13"]), l)
+            par_marque.setdefault(_marque(l["designation"]), l)
+    hors_releve = [r for r in all_rows
+                   if (r.get("canal", "").endswith(" Direct") and r["canal"] != "Biogaran Direct")
+                   or r.get("canal") == "Alliance"]
     res = []
-    for r in directs:
-        l = ref.get(_marque(r["libelle"]))
-        if not l:
+    for r in hors_releve:
+        cip = cle_cip13(r["cip13"])
+        if not str(cip).startswith("34009"):
+            continue
+        l = par_cip.get(cip) or par_marque.get(_marque(r["libelle"]))
+        if l:
+            mol, statut, labo = l["molecule"], l["statut"], l["laboratoire"]
+        elif _marque(r["libelle"]) in MARQUES_BIOSIM:
+            mol, statut, labo = MARQUES_BIOSIM[_marque(r["libelle"])]
+            labo = labo or f"non précisé ({_marque(r['libelle'])})"
+        else:
             continue
         mm, aaaa = r["periode"].split("/") if "/" in r["periode"] else ("0", "0")
         res.append({
-            "molecule": l["molecule"], "statut": l["statut"], "laboratoire": l["laboratoire"],
+            "molecule": mol, "statut": statut, "laboratoire": labo,
             "designation": r["libelle"], "cip13": r["cip13"],
             "trimestre": (libelle_periode(int(aaaa), int(mm)) if libelle_periode
                           else f"{aaaa} T{(int(mm) - 1) // 3 + 1}"),
             "qte": r["qte_fact"], "ca_pght": None,
-            "ca_brut": round(r["ca_ppht"], 2), "remise": round(r["remise_ht"], 2),
-            "ca_net": round(r["ca_ppht"] - r["remise_ht"], 2),
+            "ca_brut": round(r["ca_ppht"], 2), "remise": round(r["remise_ht"] or 0, 2),
+            "ca_net": round(r["ca_ppht"] - (r["remise_ht"] or 0), 2),
             "source": r["canal"],
         })
-    if directs and not ref:
-        print("  ⚠️  Factures directes fournies sans relevé OCP des biosimilaires : les "
-              "biosimilaires achetés en direct ne peuvent pas être identifiés.", file=sys.stderr)
     return res
 
 
@@ -2315,18 +2398,18 @@ def build_sheet_biosimilaires_ocp(wb, releves, lignes_directes=None):
         for r in releves) or "aucun relevé fourni"
     canaux_directs = sorted({l["source"] for l in lignes_directes})
     ws["A2"] = ("Sources : relevé OCP « Achats des produits BIOSIMILAIRES » — " + sources + ". "
-                + (f"Factures directes ({', '.join(canaux_directs)}) : montants facturés, "
+                + (f"Factures hors OCP ({', '.join(canaux_directs)}) : montants facturés, "
                    "période (mois ou trimestre, comme le relevé) de la date de facture, produit "
-                   "identifié par sa marque dans le relevé OCP. "
+                   "identifié par son CIP ou sa marque (relevé OCP, puis liste des marques de l'outil). "
                    if canaux_directs else "")
-                + "CA brut = prix d'achat avant remise (OCP : PPHT ; direct : PFHT facturé) ; "
+                + "CA brut = prix d'achat avant remise (OCP et Alliance : PPHT ; direct : PFHT facturé) ; "
                 "remise OCP retrouvée par CIP et période dans les récaps d'offres OCP ; CA remisé = "
                 "CA brut − remise. Taux de substitution (part biosimilaire) et part de marché "
                 + p_nom + " calculés sur le CA brut, tous laboratoires d'une même molécule "
                 "(biosimilaires et bioréférent), UNIQUEMENT sur les périodes où la substitution par le "
                 "pharmacien était autorisée (période commençant à la date d'effet de l'arrêté ou après ; "
                 "colonne « Substituable depuis »). Les montants "
-                "du relevé OCP ne sont PAS additionnés aux autres onglets ; les achats directs figurent "
+                "du relevé OCP ne sont PAS additionnés aux autres onglets ; les achats Alliance et directs figurent "
                 "aussi dans 'Détail lignes'. Colonne « Source » du détail pour filtrer.")
     ws["A2"].font = SUBTITLE_FONT
     ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
